@@ -6,7 +6,8 @@ cd "$SCRIPT_DIR"
 
 IMAGE_NAME="lortnoc-monitor"
 CONTAINER_NAME="lortnoc-monitor-app"
-DOCKER_ARGS="--rm -p 8080:8080 --name $CONTAINER_NAME"
+# Mount config volume to ensure configuration is available and up-to-date
+DOCKER_ARGS="--rm -p 8080:8080 --name $CONTAINER_NAME -v $(pwd)/../config:/app/config"
 
 case "$1" in
   build)
@@ -25,7 +26,6 @@ case "$1" in
     docker run -it \
       -v $(pwd)/sources:/app/sources \
       -v $(pwd)/../lortnoc_core:/app/lortnoc_core \
-      -v $(pwd)/../config:/app/config \
       $DOCKER_ARGS \
       $IMAGE_NAME \
       bash
