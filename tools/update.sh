@@ -55,9 +55,9 @@ elif [ "$MODE" == "monitor" ]; then
   # Restart Docker Container
   cd lortnoc_monitor
   echo "[+] Rebuilding Docker Container..."
-  make build
+  ./manage.sh build
   echo "[+] Restarting Container..."
-  make run
+  ./manage.sh run
 fi
 
 echo "[✓] Lortnoc Update Complete."

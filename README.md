@@ -85,8 +85,8 @@ For Lortnoc to function, the Bot must have permissions to read messages and crea
 The monitor is designed to run in a Docker container.
 ```bash
 cd lortnoc_monitor
-make build
-make run
+./manage.sh build
+./manage.sh run
 # Access via http://localhost:8080
 ```
 
@@ -103,8 +103,8 @@ cd lortnoc_client
 Useful to quickly test the client logic on your local machine without installing system services.
 ```bash
 cd lortnoc_client
-make build
-make run
+./manage.sh build
+./manage.sh run
 ```
 
 ## 🛠 Maintenance (Self-Update)
