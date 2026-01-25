@@ -1,0 +1,10 @@
+{
+  "admin_password"      : "",
+  "client_name"         : "Lortnoc-Device",
+  "heartbeat_interval"  : 300,
+  "log_file"            : "/tmp/lortnoc.log",
+  "discord": {
+    "token"                 : "",
+    "heartbeat_channel_id"  : ""
+  }
+}

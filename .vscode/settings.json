@@ -1,0 +1,23 @@
+{
+  "pylint.args": [
+    "--rcfile=${workspaceFolder}/tools/pylint/.pylintrc"
+  ],
+  "[python]": {
+    "editor.tabSize": 2
+  },
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}"
+  ],
+  "python.analysis.diagnosticSeverityOverrides": {
+    "reportMissingImports": "none"
+  },
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}"
+  },
+  "terminal.integrated.env.linux": {
+    "PYTHONPATH": "${workspaceFolder}"
+  },
+  "terminal.integrated.env.windows": {
+    "PYTHONPATH": "${workspaceFolder}"
+  }
+}
