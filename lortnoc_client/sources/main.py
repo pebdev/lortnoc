@@ -81,7 +81,18 @@ class LortnocClient:
     self.transport = DiscordTransport(token, channels_to_listen)
     self.transport.set_callback(self.handle_message)
 
-    self.logger.info(f"Initialized Lortnoc Client ({self.client_id})")
+    # Version Resolution
+    self.version = "unknown"
+    try:
+      # VERSION file is expected at ../../VERSION relative to this file
+      version_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../VERSION'))
+      if os.path.exists(version_file):
+        with open(version_file, 'r', encoding='utf-8') as f:
+          self.version = f.read().strip()
+    except Exception:
+      pass
+
+    self.logger.info(f"Initialized Lortnoc Client ({self.client_id}) v{self.version}")
 
 
   # L I F E C Y C L E --------------------------------------------------------------------------------------------------
@@ -201,6 +212,7 @@ class LortnocClient:
         "_target_channel_id": self.heartbeat_channel_id or None,
         "payload": {
           "status": "online",
+          "version": self.version,
           "os": self.os_info,
           "command_channel_id": self.cmd_channel_id,
           **stats
@@ -235,16 +247,27 @@ class LortnocClient:
       elif action == 'exec':
         result, is_error = await self._exec_shell(args[0] if args else "")
       elif action == 'update':
-        # We need to call the script tools/update.sh client
-        # Assuming the script is in ../tools/update.sh relative to main.py
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools/update.sh'))
-        if os.path.exists(script_path):
-          result = "Update initiated. Service will restart..."
-          # Fire and forget update (it kills the process)
-          asyncio.create_task(self._delayed_exec(f"{script_path} client", 1))
-        else:
-          result = f"Update script not found at {script_path}"
-          is_error = True
+        # Trigger Self-Update via the installer script
+        # 1. Download installer
+        # 2. Execute it
+
+        # Determine installation root (where main.py is relative to root)
+        # ../../lortnoc_client/sources/main.py -> repo_root is ../..
+        # But we want to call the Update Script with the current directory as target.
+        # Ideally, we call the script from the web to be stateless or use a local copy if we shipped it.
+        # But since we moved to "GitHub Release" model, we should download the latest installer.
+
+        # Get install dir: parent of lortnoc_client
+        # sources/main.py -> lortnoc_client -> root
+        current_file = os.path.abspath(__file__)
+        client_dir = os.path.dirname(os.path.dirname(current_file)) # .../lortnoc_client
+        install_root = os.path.dirname(client_dir) # The directory containing lortnoc_client
+
+        installer_url = "https://raw.githubusercontent.com/peb/lortnoc/master/tools/installers/install_client.sh"
+        cmd = f"curl -sL {installer_url} | bash -s -- {install_root}"
+
+        result = "Update initiated via Installer. Service will restart..."
+        asyncio.create_task(self._delayed_exec(cmd, 1))
 
       elif action == 'ping':
         # Immediate Heartbeat

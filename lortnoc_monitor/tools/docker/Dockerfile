@@ -4,6 +4,7 @@ WORKDIR /app
 
 COPY lortnoc_monitor/tools/docker/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
 
 COPY config/ /app/config/
 COPY lortnoc_core/ /app/lortnoc_core/

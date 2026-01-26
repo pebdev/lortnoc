@@ -73,6 +73,7 @@ For Lortnoc to function, the Bot must have permissions to read messages and crea
 ```
 **Configuration Fields :**
 * `admin_password` (Monitor Only): Password to access the web dashboard. Default: `admin`.
+* `otp_enabled` (Monitor Only): Enable Two-Factor Authentication via Discord channel `#authentication`. Default: `false`.
 * `client_name` : Unique identifier for this device. If omitted, the system hostname is used. Ideally use `kebab-case`.
 * `log_file` : Path to the log file. Default: `logs/monitor.log`.
 * `heartbeat_interval` (optional, default: 300): Check-in frequency in seconds.
@@ -91,6 +92,10 @@ cd lortnoc_monitor
 ```
 
 ### 2. Install the Client (Systemd)
+
+curl -sL https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/installers/install_client.sh | bash
+curl -sL https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/installers/install_monitor.sh | bash
+
 For permanent installation on a target device (e.g., Raspberry Pi):
 ```bash
 cd lortnoc_client
@@ -114,3 +119,12 @@ All updates are centralized and managed via the **Monitor Web Interface**.
 *   **Clients**: You can trigger a self-update command from the dashboard for any specific client.
 *   **Monitor**: The monitor can also update itself via the interface (rebuilds and restarts the container).
 
+
+## Todo
+- [x] mechanim to identify available updates for both monitor and clients
+- [x] add "las activity" timestamp for clients on the monitor dashboard
+- [x] provide a way to remove clients from the monitor dashboard
+- [ ] add more system metrics (disk usage, network stats, etc.)
+- [x] double authentication mechanism for monitor web interface
+- [ ] implement encrypted communication between client and monitor
+- [ ] security audits and hardening

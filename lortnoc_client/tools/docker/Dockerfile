@@ -3,7 +3,7 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install dependencies both for client and core (if any extra)
-COPY lortnoc_client/tools/requirements.txt .
+COPY lortnoc_client/tools/scripts/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy directories
@@ -16,6 +16,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY config/ /app/config/
 COPY lortnoc_core/ /app/lortnoc_core/
 COPY lortnoc_client/sources/ /app/sources/
+COPY resources/ /app/resources/
+COPY tools/ /app/tools/
 
 # Create data/log dir if needed
 RUN mkdir -p /app/data

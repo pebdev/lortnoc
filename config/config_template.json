@@ -1,5 +1,7 @@
 {
   "admin_password"      : "",
+  "otp_enabled"         : false,
+
   "client_name"         : "Lortnoc-Device",
   "heartbeat_interval"  : 300,
   "log_file"            : "/tmp/lortnoc.log",

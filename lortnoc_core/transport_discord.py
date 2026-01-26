@@ -10,7 +10,7 @@
 ########################################################################################################################
 
 # I M P O R T ##########################################################################################################
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import logging
 import asyncio
@@ -32,7 +32,7 @@ class DiscordTransport(Transport):
   """
 
   # ----------------------------------------------------------------------------------------------------------------------
-  def __init__ (self, _token: str, _listening_channels: list[int] = None) -> None:
+  def __init__ (self, _token: str, _listening_channels: Optional[list[int]] = None) -> None:
     if not discord:
       raise ImportError("discord.py is not installed. Please install it with `pip install discord.py`.")
 
@@ -60,11 +60,15 @@ class DiscordTransport(Transport):
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def on_ready (self) -> None:
+    """Called when the Discord client is ready."""
+
     logger.info(f"Connected to Discord as {self.client.user} (ID: {self.client.user.id})")
     self._connected = True
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def on_message_event (self, _message) -> None:
+    """Handles incoming Discord messages."""
+
     # Only listen to the specific channel
     if _message.channel.id not in self.listening_channels:
       return
@@ -82,13 +86,15 @@ class DiscordTransport(Transport):
       # Pass to callback
       if self.on_message:
         await self.on_message(data)
+
     except json.JSONDecodeError:
       # Not a JSON message, ignore
       pass
 
   # ----------------------------------------------------------------------------------------------------------------------
-  async def _extract_json_from_message (self, _message) -> str | None:
+  async def _extract_json_from_message (self, _message) -> Optional[str]:
     """Helper to extract JSON string from message attachments or content."""
+
     # 1. Handle Attachments (Priority)
     if _message.attachments:
       for attachment in _message.attachments:
@@ -115,12 +121,15 @@ class DiscordTransport(Transport):
   # ----------------------------------------------------------------------------------------------------------------------
   def add_listening_channel (self, _channel_id: int) -> None:
     """Dynamically adds a channel to the list of watched channels."""
+
     if _channel_id not in self.listening_channels:
       self.listening_channels.append(_channel_id)
       logger.info(f"Dynamically added channel watching: {_channel_id}")
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def connect (self) -> None:
+    """Establishes connection to Discord."""
+
     if self._connected:
       return
 
@@ -130,6 +139,8 @@ class DiscordTransport(Transport):
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def disconnect (self) -> None:
+    """Closes connection to Discord."""
+
     if not self._connected:
       return
 
@@ -139,6 +150,8 @@ class DiscordTransport(Transport):
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def send (self, _message: Dict[str, Any]) -> None:
+    """Sends a JSON message to the specified Discord channel."""
+
     if not self._connected:
       logger.warning("Cannot send message: Transport not connected.")
       return
@@ -175,23 +188,62 @@ class DiscordTransport(Transport):
       logger.error(f"Channel {target_channel_id} not found.")
 
   # ----------------------------------------------------------------------------------------------------------------------
-  async def _send_chunked (self, channel, payload: str) -> None:
+  async def send_message_to_channel_name (self, _channel_name: str, _message: str) -> bool:
+    """
+    Finds a channel by name and sends a message (string text).
+    Creates the channel if it doesn't exist (in the first available guild).
+    """
+
+    if not self._connected or not self.client.guilds:
+      logger.warning("Discord not connected or no guilds found.")
+      return False
+
+    # Try to find channel in any guild
+    target_channel = None
+    for guild in self.client.guilds:
+      target_channel = discord.utils.get(guild.text_channels, name=_channel_name)
+      if target_channel:
+        break
+
+    # If not found, create in the first guild
+    if not target_channel:
+      guild = self.client.guilds[0]
+      try:
+        logger.info(f"Channel '{_channel_name}' not found. Creating in guild '{guild.name}'.")
+        target_channel = await guild.create_text_channel(_channel_name)
+      except discord.Forbidden:
+        logger.error(f"Missing permissions to create channel '{_channel_name}' in guild '{guild.name}'")
+        return False
+      except Exception as e:
+        logger.error(f"Failed to create channel: {e}")
+        return False
+
+    try:
+      await target_channel.send(_message)
+      return True
+    except Exception as e:
+      logger.error(f"Failed to send message to named channel '{_channel_name}': {e}")
+      return False
+
+  # ----------------------------------------------------------------------------------------------------------------------
+  async def _send_chunked (self, _channel: discord.TextChannel, _payload: str) -> None:
     """Sends a payload to a Discord channel. Uses file attachment if too large."""
+
     max_chunk_size = 1900
 
     # 1. Small Payload: Send as text block (Preferred for speed/readability)
-    if len(payload) <= max_chunk_size:
-      await channel.send(f"```json\n{payload}\n```")
+    if len(_payload) <= max_chunk_size:
+      await _channel.send(f"```json\n{_payload}\n```")
       return
 
     # 2. Large Payload: Send as File Attachment
     # Discord supports 10MB+ files, which is plenty for text logs.
     try:
-      with io.BytesIO(payload.encode('utf-8')) as f:
+      with io.BytesIO(_payload.encode('utf-8')) as f:
         file_obj = discord.File(f, filename="payload.json")
-        await channel.send(content="[LARGE PAYLOAD] See attachment.", file=file_obj)
+        await _channel.send(content="[LARGE PAYLOAD] See attachment.", file=file_obj)
     except Exception as e:
       logger.error(f"Failed to send large payload as attachment: {e}")
       # Last resort error
       error_msg = json.dumps({"type": "log", "message": f"\n[ERROR] Payload too large and attachment failed: {e}"})
-      await channel.send(f"```json\n{error_msg}\n```")
+      await _channel.send(f"```json\n{error_msg}\n```")
