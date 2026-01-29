@@ -1,9 +1,20 @@
 #!/bin/bash
+########################################################################################################################
+# Project : Lortnoc
+# Author  : PEB <pebdev@lavache.com>
+# Date    : 28.01.2026
+########################################################################################################################
+# Copyright (C) 2026
+# This file is copyright under the latest version of the EUPL.
+# Please see LICENSE file for your rights under this license.
+########################################################################################################################
 set -e
 
 # Configurations
 REPO_URL="https://api.github.com/repos/pebdev/lortnoc/releases/latest"
 SERVICE_NAME="lortnoc-client"
+CONFIG_FILE="config.json"
+TEMPLATE_FILE="config_template.json"
 
 # Colors
 GREEN='\033[0;32m'
@@ -32,6 +43,7 @@ if [ -z "$1" ]; then
 fi
 
 # Ensure absolute path
+mkdir -p "$1"
 INSTALL_DIR=$(cd "$1" && pwd)
 mkdir -p "$INSTALL_DIR"
 echo -e "${YELLOW}[*] Target Directory : $INSTALL_DIR${NC}"
@@ -70,28 +82,51 @@ TEMP_DIR=$(mktemp -d)
 curl -sL "$TARBALL_URL" | tar -xz -C "$TEMP_DIR" --strip-components=1
 
 echo -e "${YELLOW}[*] Installing files to $INSTALL_DIR...${NC}"
-mkdir -p "$INSTALL_DIR"
 
 # Backup config if exists
-if [ -f "$INSTALL_DIR/config/config.json" ]; then
-  cp "$INSTALL_DIR/config/config.json" "$TEMP_DIR/config.json.bak"
+if [ -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
+  cp "$INSTALL_DIR/config/$CONFIG_FILE" "$TEMP_DIR/$CONFIG_FILE.bak"
 fi
 
 # Copy necessary folders (Core + Client)
 mkdir -p "$INSTALL_DIR/lortnoc_core"
 mkdir -p "$INSTALL_DIR/lortnoc_client"
 mkdir -p "$INSTALL_DIR/config"
+
 cp -R "$TEMP_DIR/lortnoc_core/"* "$INSTALL_DIR/lortnoc_core/"
 cp -R "$TEMP_DIR/lortnoc_client/"* "$INSTALL_DIR/lortnoc_client/"
 
 # Copy template config only
-if [ -f "$TEMP_DIR/config/config_template.json" ]; then
-  cp "$TEMP_DIR/config/config_template.json" "$INSTALL_DIR/config/"
+if [ -f "$TEMP_DIR/config/$TEMPLATE_FILE" ]; then
+  cp "$TEMP_DIR/config/$TEMPLATE_FILE" "$INSTALL_DIR/config/"
 fi
 
 # Restore config if backed up
-if [ -f "$TEMP_DIR/config.json.bak" ]; then
-  mv "$TEMP_DIR/config.json.bak" "$INSTALL_DIR/config/config.json"
+if [ -f "$TEMP_DIR/$CONFIG_FILE.bak" ]; then
+  mv "$TEMP_DIR/$CONFIG_FILE.bak" "$INSTALL_DIR/config/$CONFIG_FILE"
+fi
+
+# First configuration
+if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
+  read -p "Enter Client Name          : " CLIENT_NAME
+  read -p "Enter Discord Bot Token    : " TOKEN
+  read -p "Enter Heartbeat Channel ID : " CHANNEL_ID
+
+  python3 -c "
+import json
+with open('$INSTALL_DIR/config/$TEMPLATE_FILE', 'r') as f:
+  config = json.load(f)
+
+config['client_name'] = '$CLIENT_NAME'
+config['discord']['token'] = '$TOKEN'
+config['discord']['heartbeat_channel_id'] = '$CHANNEL_ID'
+
+with open('$INSTALL_DIR/config/$CONFIG_FILE', 'w') as f:
+  json.dump(config, f, indent=2)
+"
+  echo "[+] Configuration saved to $CONFIG_FILE."
+else
+  echo "[+] Configuration file exists at $CONFIG_FILE."
 fi
 
 
@@ -100,28 +135,15 @@ echo -e "${YELLOW}[*] Setting up Python Environment...${NC}"
 if [ ! -d "$INSTALL_DIR/.venv" ]; then
   python3 -m venv "$INSTALL_DIR/.venv"
 fi
-"$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/lortnoc_client/tools/scripts/requirements.txt" --upgrade
+"$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/lortnoc_client/requirements.txt" --upgrade
 
 
 # --- Finalize -----------------------------------------------------------------
 echo "$LATEST_VERSION" > "$INSTALL_DIR/VERSION"
 rm -rf "$TEMP_DIR"
 
-# Create/Update Launcher
-cat > "$INSTALL_DIR/run.sh" <<EOF
-#!/bin/bash
-cd "$INSTALL_DIR"
-export PYTHONPATH="\$PYTHONPATH:$INSTALL_DIR"
-"$INSTALL_DIR/.venv/bin/python" lortnoc_client/sources/main.py
-EOF
-chmod +x "$INSTALL_DIR/run.sh"
-
-# Create Update Script
-cat > "$INSTALL_DIR/update.sh" <<EOF
-#!/bin/bash
-curl -sL "https://raw.githubusercontent.com/pebdev/lortnoc/main/tools/installers/install_client.sh" | bash -s -- "$INSTALL_DIR"
-EOF
-chmod +x "$INSTALL_DIR/update.sh"
+# Ensure run.sh is executable
+chmod +x "$INSTALL_DIR/lortnoc_client/tools/scripts/run.sh"
 
 # Restart Service if exists
 if systemctl list-units --full -all | grep -Fq "lortnoc-client.service"; then
