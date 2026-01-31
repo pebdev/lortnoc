@@ -5,8 +5,18 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
 # Resolve Repo Root (Looking for .git or just going up 3 levels)
-# Structure: lortnoc_monitor/tools/docker -> ../../../
-REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+# Structure Dev: lortnoc_monitor/tools/docker -> ../../../ (Repo Root)
+# Structure Prod: tools/docker -> ../../ (Install Dir)
+ROOT_CANDIDATE_2="$(dirname "$(dirname "$SCRIPT_DIR")")"
+ROOT_CANDIDATE_3="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+
+if [ -d "$ROOT_CANDIDATE_2/lortnoc_core" ]; then
+    REPO_ROOT="$ROOT_CANDIDATE_2"
+    echo "Detected Install Environment (Root: $REPO_ROOT)"
+else
+    REPO_ROOT="$ROOT_CANDIDATE_3"
+    echo "Detected Dev Environment (Root: $REPO_ROOT)"
+fi
 
 IMAGE_NAME="lortnoc-monitor"
 CONTAINER_NAME="lortnoc-monitor-app"

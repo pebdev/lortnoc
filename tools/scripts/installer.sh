@@ -11,9 +11,9 @@
 set -e
 
 # --- Configurations ---------------------------------------------------------------------------------------------------
-BRANCH="feature/major-update"
-TARBALL_URL="https://github.com/pebdev/lortnoc/archive/refs/heads/$BRANCH.tar.gz"
-LATEST_VERSION="$BRANCH"
+# Fetch latest release tag from GitHub API
+LATEST_VERSION=$(curl -s "https://api.github.com/repos/pebdev/lortnoc/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+TARBALL_URL="https://github.com/pebdev/lortnoc/archive/refs/tags/$LATEST_VERSION.tar.gz"
 
 # Colors
 RED='\033[0;31m'
@@ -36,6 +36,11 @@ fi
 
 if [[ -z "$TARGET_DIR" ]]; then
   echo -e "${RED}Error: Install directory argument is required.${NC}"
+  exit 1
+fi
+
+if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" == "null" ]; then
+  echo -e "${RED}Error: Unable to fetch latest release version from GitHub.${NC}"
   exit 1
 fi
 
@@ -217,7 +222,7 @@ if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "client" ] && [ -c /dev/tty ]
   echo -e ""
   echo -e "${YELLOW}[?] Do you want to create a Systemd Service for auto-start? [y/N] ${NC}"
   read -r -n 1 response < /dev/tty
-  echo "" # Newline
+  echo ""
 
   if [[ "$response" =~ ^[yY]$ ]]; then
     SERVICE_NAME="lortnoc-client"
@@ -244,7 +249,7 @@ After=network.target
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_DIR/tools/scripts/run.sh
+ExecStart=$INSTALL_DIR/tools/scripts/run.sh client
 Restart=always
 RestartSec=10
 
@@ -265,7 +270,6 @@ fi
 
 rm -rf "$TEMP_DIR"
 chmod +x "$INSTALL_DIR/tools/scripts/"*.sh
-
 echo -e "${GREEN}[✓] $COMPONENT installed/updated to $LATEST_VERSION.${NC}"
 
 echo -e ""
