@@ -36,7 +36,8 @@ echo "[*] Checking updates for $COMPONENT..."
 if command -v curl &> /dev/null; then
   TEMP_INSTALLER=$(mktemp)
   if curl -fsL "$INSTALLER_URL" -o "$TEMP_INSTALLER"; then
-    bash "$TEMP_INSTALLER" "$COMPONENT" "$INSTALL_DIR"
+    # Auto-update: Use --update-runtime mode to avoid Docker rebuilds or heavy setup
+    bash "$TEMP_INSTALLER" "$COMPONENT" "$INSTALL_DIR" "--update-runtime"
     rm "$TEMP_INSTALLER"
   else
     echo -e "${YELLOW}[!] Update check skipped (Remote installer unavailable).${NC}"

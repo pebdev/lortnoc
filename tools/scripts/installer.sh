@@ -26,17 +26,20 @@ NC='\033[0m'
 # --- Usage ------------------------------------------------------------------------------------------------------------
 COMPONENT="$1"
 TARGET_DIR="$2"
+MODE="$3"
 
 if [[ -z "$COMPONENT" || ("$COMPONENT" != "client" && "$COMPONENT" != "monitor") ]]; then
-  echo -e "${RED}Usage: $0 <client|monitor> <install_directory>${NC}"
+  echo -e "${RED}Usage: $0 <client|monitor> <install_directory> [mode]${NC}"
+  echo -e "${RED}Modes: --install (default), --update-runtime${NC}"
   exit 1
 fi
 
 if [[ -z "$TARGET_DIR" ]]; then
   echo -e "${RED}Error: Install directory argument is required.${NC}"
-  echo -e "${RED}Usage: $0 <client|monitor> <install_directory>${NC}"
   exit 1
 fi
+
+[ -z "$MODE" ] && MODE="--install"
 
 # Ensure absolute path
 mkdir -p "$TARGET_DIR"
@@ -131,15 +134,23 @@ fi
 
 # Interactive Config (Only if new)
 if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
-  echo -e "${YELLOW}[*] Initial Configuration Required${NC}"
+  # Always ensure connection file exists to prevent startup crash
+  echo -e "${YELLOW}[*] Creating default configuration from template...${NC}"
+  if [ -f "$INSTALL_DIR/config/$TEMPLATE_FILE" ]; then
+      cp "$INSTALL_DIR/config/$TEMPLATE_FILE" "$INSTALL_DIR/config/$CONFIG_FILE"
+  else
+      echo -e "${RED}[!] Template file missing. Configuration initialization failed.${NC}"
+  fi
 
-  python3 -c "
+  # Only attempt interactive setup if we have a TTY (terminal)
+  if [ -t 0 ]; then
+    echo -e "${YELLOW}[*] Starting Interactive Configuration...${NC}"
+    python3 -c "
 import json, os
-template = '$INSTALL_DIR/config/$TEMPLATE_FILE'
 target = '$INSTALL_DIR/config/$CONFIG_FILE'
 
-if os.path.exists(template):
-  with open(template, 'r') as f: config = json.load(f)
+if os.path.exists(target):
+  with open(target, 'r') as f: config = json.load(f)
 
   if '$COMPONENT' == 'monitor':
     config['discord']['token'] = input('Discord Token: ')
@@ -151,14 +162,18 @@ if os.path.exists(template):
     config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
 
   with open(target, 'w') as f: json.dump(config, f, indent=2)
-  print('[+] Config saved.')
+  print('[+] Config updated.')
 "
+  else
+    echo -e "${YELLOW}[!] Non-interactive mode detected using default config.${NC}"
+    echo -e "${YELLOW}[!] You must edit $INSTALL_DIR/config/$CONFIG_FILE manually.${NC}"
+  fi
 fi
 
 
 # --- Post Install -----------------------------------------------------------------------------------------------------
-if [ "$COMPONENT" == "monitor" ] && [ ! -f /.dockerenv ] && command -v docker &> /dev/null; then
-  # Monitor on Host (Docker Image Rebuild)
+if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "monitor" ]; then
+  # Monitor Installation on Host -> Docker Build
   echo -e "${YELLOW}[*] Rebuilding Docker Container...${NC}"
   cd "$INSTALL_DIR"
 
@@ -167,14 +182,20 @@ if [ "$COMPONENT" == "monitor" ] && [ ! -f /.dockerenv ] && command -v docker &>
 
   # Rebuild
   if [ -f "tools/docker/Dockerfile" ]; then
-    docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
-    echo -e "${GREEN}[*] Docker Image Rebuilt.${NC}"
-    echo -e "${GREEN}[*] You can now start the monitor using: ${INSTALL_DIR}/tools/docker/manage.sh run${NC}"
+    if command -v docker &> /dev/null; then
+        docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
+        echo -e "${GREEN}[*] Docker Image Rebuilt.${NC}"
+        echo -e "${GREEN}[*] You can now start the monitor using: ${INSTALL_DIR}/tools/docker/manage.sh run${NC}"
+    else
+        echo -e "${RED}[!] Docker not found. Cannot build image.${NC}"
+    fi
+  else
+    echo -e "${RED}[!] Dockerfile not found.${NC}"
   fi
+
 else
-  # Runtime Update (Client OR Monitor inside Container)
+  # Runtime Update (Client OR Monitor inside Container OR Monitor Update-Only)
   # We enforce a virtualenv in all cases to ensure consistency and isolation
-  # even inside the container (avoiding conflicts with system packages or debian-managed python)
   echo -e "${YELLOW}[*] Updating Python Environment...${NC}"
   [ ! -d "$INSTALL_DIR/.venv" ] && python3 -m venv "$INSTALL_DIR/.venv"
 
