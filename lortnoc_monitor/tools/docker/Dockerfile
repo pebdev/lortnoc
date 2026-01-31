@@ -19,6 +19,7 @@ RUN mkdir -p /app/data
 # Copy unified tools
 COPY tools/scripts/ /app/tools/scripts/
 RUN chmod +x /app/tools/scripts/*.sh
+COPY VERSION /app/VERSION
 
 ENV PYTHONPATH="/app"
 EXPOSE 8080

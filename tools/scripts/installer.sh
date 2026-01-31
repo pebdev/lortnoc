@@ -133,17 +133,18 @@ if [ -f "$TEMP_DIR/config/$TEMPLATE_FILE" ]; then
 fi
 
 # Interactive Config (Only if new)
+CONFIG_STATUS="ok"
 if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
   # Always ensure connection file exists to prevent startup crash
   echo -e "${YELLOW}[*] Creating default configuration from template...${NC}"
   if [ -f "$INSTALL_DIR/config/$TEMPLATE_FILE" ]; then
-      cp "$INSTALL_DIR/config/$TEMPLATE_FILE" "$INSTALL_DIR/config/$CONFIG_FILE"
+    cp "$INSTALL_DIR/config/$TEMPLATE_FILE" "$INSTALL_DIR/config/$CONFIG_FILE"
   else
-      echo -e "${RED}[!] Template file missing. Configuration initialization failed.${NC}"
+    echo -e "${RED}[!] Template file missing. Configuration initialization failed.${NC}"
   fi
 
-  # Only attempt interactive setup if we have a TTY (terminal)
-  if [ -t 0 ]; then
+  # Only attempt interactive setup if we have a TTY (terminal) or direct access to /dev/tty
+  if [ -c /dev/tty ]; then
     echo -e "${YELLOW}[*] Starting Interactive Configuration...${NC}"
     python3 -c "
 import json, os
@@ -163,13 +164,19 @@ if os.path.exists(target):
 
   with open(target, 'w') as f: json.dump(config, f, indent=2)
   print('[+] Config updated.')
-"
+" < /dev/tty
+    if [ $? -ne 0 ]; then
+      CONFIG_STATUS="manual"
+    fi
   else
     echo -e "${YELLOW}[!] Non-interactive mode detected using default config.${NC}"
-    echo -e "${YELLOW}[!] You must edit $INSTALL_DIR/config/$CONFIG_FILE manually.${NC}"
+    CONFIG_STATUS="manual"
   fi
 fi
 
+
+# Save Version immediately after install so it's available for Docker build
+echo "$LATEST_VERSION" > "$INSTALL_DIR/VERSION"
 
 # --- Post Install -----------------------------------------------------------------------------------------------------
 if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "monitor" ]; then
@@ -183,11 +190,11 @@ if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "monitor" ]; then
   # Rebuild
   if [ -f "tools/docker/Dockerfile" ]; then
     if command -v docker &> /dev/null; then
-        docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
-        echo -e "${GREEN}[*] Docker Image Rebuilt.${NC}"
-        echo -e "${GREEN}[*] You can now start the monitor using: ${INSTALL_DIR}/tools/docker/manage.sh run${NC}"
+      docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
+      echo -e "${GREEN}[*] Docker Image Rebuilt.${NC}"
+      echo -e "${GREEN}[*] You can now start the monitor using: ${INSTALL_DIR}/tools/docker/manage.sh run${NC}"
     else
-        echo -e "${RED}[!] Docker not found. Cannot build image.${NC}"
+      echo -e "${RED}[!] Docker not found. Cannot build image.${NC}"
     fi
   else
     echo -e "${RED}[!] Dockerfile not found.${NC}"
@@ -205,9 +212,105 @@ else
   fi
 fi
 
-# Save Version
-echo "$LATEST_VERSION" > "$INSTALL_DIR/VERSION"
+# --- Systemd Service Proposal (Client Only) ---------------------------------------------------------------------------
+if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "client" ] && [ -c /dev/tty ]; then
+  echo -e ""
+  echo -e "${YELLOW}[?] Do you want to create a Systemd Service for auto-start? [y/N] ${NC}"
+  read -r -n 1 response < /dev/tty
+  echo "" # Newline
+
+  if [[ "$response" =~ ^[yY]$ ]]; then
+    SERVICE_NAME="lortnoc-client"
+    SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
+    USER_NAME=$(whoami)
+
+    # Check for root/sudo
+    if [ "$EUID" -ne 0 ] && ! command -v sudo &> /dev/null; then
+      echo -e "${RED}[!] Sudo is required to create systemd service. Skipping.${NC}"
+    else
+      SUDO=""
+      [ "$EUID" -ne 0 ] && SUDO="sudo"
+
+      echo -e "${YELLOW}[*] Creating ${SERVICE_FILE}...${NC}"
+
+      # Generate Service Content using a temporary file
+      TMP_SERVICE=$(mktemp)
+      cat <<EOF > "$TMP_SERVICE"
+[Unit]
+Description=Lortnoc Client Service
+After=network.target
+
+[Service]
+Type=simple
+User=$USER_NAME
+WorkingDirectory=$INSTALL_DIR
+ExecStart=$INSTALL_DIR/tools/scripts/run.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+      # Move with sudo
+      $SUDO mv "$TMP_SERVICE" "$SERVICE_FILE"
+      $SUDO chmod 644 "$SERVICE_FILE"
+      $SUDO systemctl daemon-reload
+      $SUDO systemctl enable "$SERVICE_NAME"
+      echo -e "${GREEN}[✓] Service created and enabled. It will start on boot.${NC}"
+      echo -e "${GREEN}[*] You can start it now with: sudo systemctl start $SERVICE_NAME${NC}"
+    fi
+  fi
+fi
+
 rm -rf "$TEMP_DIR"
 chmod +x "$INSTALL_DIR/tools/scripts/"*.sh
 
-echo -e "${GREEN}[✓] $COMPONENT updated to $LATEST_VERSION.${NC}"
+echo -e "${GREEN}[✓] $COMPONENT installed/updated to $LATEST_VERSION.${NC}"
+
+echo -e ""
+echo -e "${BLUE}=========================================${NC}"
+echo -e "${BLUE}   INSTALLATION SUMMARY                  ${NC}"
+echo -e "${BLUE}=========================================${NC}"
+
+if [ "$COMPONENT" == "monitor" ]; then
+  echo -e "  Type       : Monitor (Server)"
+  echo -e "  Location   : $INSTALL_DIR"
+  echo -e "  Config     : $INSTALL_DIR/config/config.json"
+
+  if [ "$CONFIG_STATUS" == "manual" ]; then
+    echo -e "${RED}  [!] CONFIGURATION REQUIRED${NC}"
+    echo -e "${RED}      You must edit config/config.json before starting.${NC}"
+  fi
+
+  echo -e ""
+  echo -e "${YELLOW}  [i] TO START THE MONITOR:${NC}"
+  echo -e "      cd $INSTALL_DIR"
+  echo -e "      ./tools/docker/manage.sh run"
+  echo -e ""
+  echo -e "  Then access: http://<YOUR_SERVER_IP>:8080"
+else
+  echo -e "  Type       : Client (Device)"
+  echo -e "  Location   : $INSTALL_DIR"
+  echo -e "  Config     : $INSTALL_DIR/config/config.json"
+
+  if [ "$CONFIG_STATUS" == "manual" ]; then
+    echo -e "${RED}  [!] CONFIGURATION REQUIRED${NC}"
+    echo -e "${RED}      You must edit config/config.json before starting.${NC}"
+  fi
+
+  echo -e ""
+  echo -e "${YELLOW}  [i] TO START THE CLIENT:${NC}"
+  echo -e "      $INSTALL_DIR/tools/scripts/run.sh &"
+  echo -e ""
+
+  # Check if systemd setup occurred
+  if [ -f "/etc/systemd/system/lortnoc-client.service" ]; then
+    echo -e "${YELLOW}  [i] SYSTEMD SERVICE INSTALLED${NC}"
+    echo -e "      sudo systemctl status lortnoc-client"
+  else
+    echo -e "${YELLOW}  [i] TO START ON BOOT (Systemd):${NC}"
+    echo -e "      Create a service file pointing to the run script above."
+  fi
+fi
+echo -e "${BLUE}=========================================${NC}"

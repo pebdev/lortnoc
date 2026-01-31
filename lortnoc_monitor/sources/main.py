@@ -107,6 +107,16 @@ class LortnocMonitor:
     self.logger.info("Running in PRODUCTION MODE (Discord)")
     discord_conf = self.config.get("discord", {})
     token = discord_conf.get("token")
+    hb_id = discord_conf.get("heartbeat_channel_id")
+
+    # Critical Config Validation
+    if not token:
+      self.logger.critical("Discord Token is missing in config. Exiting.")
+      sys.exit(1)
+
+    if not hb_id:
+      self.logger.critical("Heartbeat Channel ID is missing in config. Exiting.")
+      sys.exit(1)
 
     # Load persisted clients first to get their channels
     self.clients: List[Dict[str, Any]] = self._load_persisted_clients()

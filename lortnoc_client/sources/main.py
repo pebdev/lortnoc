@@ -67,13 +67,27 @@ class LortnocClient:
 
     self.os_info = f"{platform.system()} {platform.release()}"
     self.cmd_channel_id = None
-    self.heartbeat_channel_id = int(self.config.get("discord", {}).get("heartbeat_channel_id", 0))
 
-    # Transport Init
+    # Config Validation --------------------------------------------------------------------------------------------------
     token = self.config.get("discord", {}).get("token")
     if not token:
-      raise ValueError("Discord token missing in config")
+      sys.stderr.write("[FATAL] Discord Token is missing in config.json.\n")
+      sys.exit(1)
 
+    hb_id = self.config.get("discord", {}).get("heartbeat_channel_id")
+    if not hb_id:
+      sys.stderr.write("[FATAL] Heartbeat Channel ID is missing in config.json.\n")
+      sys.exit(1)
+
+    try:
+      self.heartbeat_channel_id = int(hb_id)
+    except ValueError:
+      sys.stderr.write(f"[FATAL] Invalid Heartbeat Channel ID: '{hb_id}'. Must be a number.\n")
+      sys.exit(1)
+
+    # --------------------------------------------------------------------------------------------------------------------
+
+    # Transport Init
     # Initial listen list is empty (will dynamic add own channel) or legacy
     legacy_id = self.config.get("discord", {}).get("channel_id")
     channels_to_listen = [int(legacy_id)] if legacy_id else []
