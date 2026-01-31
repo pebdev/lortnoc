@@ -7,6 +7,7 @@
 # Installer expects: <component> <install_dir>
 set -e
 
+# --- Configurations ---------------------------------------------------------------------------------------------------
 COMPONENT="$1"
 INSTALLER_URL="https://raw.githubusercontent.com/pebdev/lortnoc/feature/major-update/tools/scripts/installer.sh"
 

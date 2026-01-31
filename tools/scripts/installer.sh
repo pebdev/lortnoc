@@ -10,7 +10,10 @@
 ########################################################################################################################
 set -e
 
-REPO_URL="https://api.github.com/repos/pebdev/lortnoc/releases/latest"
+# --- Configurations ---------------------------------------------------------------------------------------------------
+BRANCH="feature/major-update"
+TARBALL_URL="https://github.com/pebdev/lortnoc/archive/refs/heads/$BRANCH.tar.gz"
+LATEST_VERSION="$BRANCH"
 
 # Colors
 RED='\033[0;31m'
@@ -25,12 +28,17 @@ COMPONENT="$1"
 TARGET_DIR="$2"
 
 if [[ -z "$COMPONENT" || ("$COMPONENT" != "client" && "$COMPONENT" != "monitor") ]]; then
-  echo -e "${RED}Usage: $0 <client|monitor> [install_directory]${NC}"
+  echo -e "${RED}Usage: $0 <client|monitor> <install_directory>${NC}"
+  exit 1
+fi
+
+if [[ -z "$TARGET_DIR" ]]; then
+  echo -e "${RED}Error: Install directory argument is required.${NC}"
+  echo -e "${RED}Usage: $0 <client|monitor> <install_directory>${NC}"
   exit 1
 fi
 
 # Ensure absolute path
-TARGET_DIR="${HOME}/lortnoc_$COMPONENT"
 mkdir -p "$TARGET_DIR"
 INSTALL_DIR=$(cd "$TARGET_DIR" && pwd)
 
@@ -52,11 +60,8 @@ for cmd in $REQUIRED; do
 done
 
 
-# --- Get Latest Release ------------------------------------------------------------------------------------------------
-echo -e "${YELLOW}[*] Checking for updates...${NC}"
-LATEST_RELEASE=$(curl -s $REPO_URL)
-LATEST_VERSION=$(echo "$LATEST_RELEASE" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-TARBALL_URL=$(echo "$LATEST_RELEASE" | grep '"tarball_url":' | sed -E 's/.*"([^"]+)".*/\1/')
+# --- Get Latest Release -----------------------------------------------------------------------------------------------
+echo -e "${YELLOW}[*] Checking for updates (Branch: $BRANCH)...${NC}"
 
 if [ -z "$LATEST_VERSION" ]; then
   echo -e "${RED}Error: Version fetch failed.${NC}"
@@ -66,7 +71,7 @@ fi
 # Check Local Version
 LOCAL_VERSION="none"
 [ -f "$INSTALL_DIR/VERSION" ] && LOCAL_VERSION=$(cat "$INSTALL_DIR/VERSION")
-[ -f "$INSTALL_DIR/version.txt" ] && LOCAL_VERSION=$(cat "$INSTALL_DIR/version.txt")
+[ -f "$INSTALL_DIR/VERSION" ] && LOCAL_VERSION=$(cat "$INSTALL_DIR/VERSION")
 
 echo -e "    Local  : $LOCAL_VERSION"
 echo -e "    Latest : $LATEST_VERSION"
@@ -77,14 +82,12 @@ if [ "$LOCAL_VERSION" == "$LATEST_VERSION" ]; then
 fi
 
 
-# --- Download & Install ------------------------------------------------------------------------------------------------
+# --- Download & Install -----------------------------------------------------------------------------------------------
 echo -e "${YELLOW}[*] Downloading update...${NC}"
 TEMP_DIR=$(mktemp -d)
 curl -sL "$TARBALL_URL" | tar -xz -C "$TEMP_DIR" --strip-components=1
 
 echo -e "${YELLOW}[*] Installing files...${NC}"
-
-# Common dirs
 mkdir -p "$INSTALL_DIR/lortnoc_core"
 mkdir -p "$INSTALL_DIR/config"
 mkdir -p "$INSTALL_DIR/resources"
@@ -93,7 +96,7 @@ mkdir -p "$INSTALL_DIR/tools/scripts"
 # Copy Core & Resources
 cp -R "$TEMP_DIR/lortnoc_core/"* "$INSTALL_DIR/lortnoc_core/"
 cp -R "$TEMP_DIR/resources/"* "$INSTALL_DIR/resources/"
-cp -R "$TEMP_DIR/tools/scripts/"* "$INSTALL_DIR/tools/scripts/"
+[ -d "$TEMP_DIR/tools/scripts/" ] && cp -R "$TEMP_DIR/tools/scripts/"* "$INSTALL_DIR/tools/scripts/"
 
 # Component specific copy
 if [ "$COMPONENT" == "monitor" ]; then
@@ -104,9 +107,8 @@ if [ "$COMPONENT" == "monitor" ]; then
   if [ ! -f /.dockerenv ]; then
     DOCKER_DST="$INSTALL_DIR/tools/docker"
     mkdir -p "$DOCKER_DST"
-    # We need Dockerfile and manage.sh which might be in lortnoc_monitor/tools/docker in the repo
-    # OR in tools/docker if we moved them?
-    # Based on current repo state: lortnoc_monitor/tools/docker
+
+    # We copy docker tools from module to global tools/docker
     if [ -d "$TEMP_DIR/lortnoc_monitor/tools/docker" ]; then
       cp -R "$TEMP_DIR/lortnoc_monitor/tools/docker/"* "$DOCKER_DST/"
     fi
@@ -118,7 +120,7 @@ else # client
 fi
 
 
-# --- Config Management ------------------------------------------------------------------------------------------------
+# --- Config Management -----------------------------------------------------------------------------------------------
 CONFIG_FILE="config.json"
 TEMPLATE_FILE="config_template.json"
 
@@ -154,24 +156,32 @@ if os.path.exists(template):
 fi
 
 
-# --- Post Install ------------------------------------------------------------------------------------------------
+# --- Post Install -----------------------------------------------------------------------------------------------------
+if [ "$COMPONENT" == "monitor" ] && [ ! -f /.dockerenv ] && command -v docker &> /dev/null; then
+  # Monitor on Host (Docker Image Rebuild)
+  echo -e "${YELLOW}[*] Rebuilding Docker Container...${NC}"
+  cd "$INSTALL_DIR"
 
-if [ "$COMPONENT" == "monitor" ]; then
-  # Docker Rebuild (Host only)
-  if [ ! -f /.dockerenv ] && command -v docker &> /dev/null; then
-    echo -e "${YELLOW}[*] Rebuilding Docker Container...${NC}"
-    cd "$INSTALL_DIR"
-    # Assuming Dockerfile is now in tools/docker/Dockerfile relative to install dir
-    if [ -f "tools/docker/Dockerfile" ]; then
-      docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
-      $INSTALL_DIR/tools/docker/manage.sh run
-    fi
+  # Ensure Docker tools executable
+  chmod +x tools/docker/*.sh 2>/dev/null || true
+
+  # Rebuild
+  if [ -f "tools/docker/Dockerfile" ]; then
+    docker build -t lortnoc-monitor -f tools/docker/Dockerfile .
+    echo -e "${GREEN}[*] Docker Image Rebuilt.${NC}"
+    echo -e "${GREEN}[*] You can now start the monitor using: ${INSTALL_DIR}/tools/docker/manage.sh run${NC}"
   fi
 else
-  # Client Venv
+  # Runtime Update (Client OR Monitor inside Container)
+  # We enforce a virtualenv in all cases to ensure consistency and isolation
+  # even inside the container (avoiding conflicts with system packages or debian-managed python)
   echo -e "${YELLOW}[*] Updating Python Environment...${NC}"
   [ ! -d "$INSTALL_DIR/.venv" ] && python3 -m venv "$INSTALL_DIR/.venv"
-  "$INSTALL_DIR/.venv/bin/pip" install -r "$INSTALL_DIR/lortnoc_client/requirements.txt" --upgrade
+
+  REQ_FILE="$INSTALL_DIR/lortnoc_$COMPONENT/requirements.txt"
+  if [ -f "$REQ_FILE" ]; then
+    "$INSTALL_DIR/.venv/bin/pip" install -r "$REQ_FILE" --upgrade
+  fi
 fi
 
 # Save Version
