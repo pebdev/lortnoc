@@ -69,7 +69,7 @@ done
 
 
 # --- Get Latest Release -----------------------------------------------------------------------------------------------
-echo -e "${YELLOW}[*] Checking for updates (Branch: $BRANCH)...${NC}"
+echo -e "${YELLOW}[*] Checking for updates...${NC}"
 
 if [ -z "$LATEST_VERSION" ]; then
   echo -e "${RED}Error: Version fetch failed.${NC}"
@@ -289,8 +289,7 @@ if [ "$COMPONENT" == "monitor" ]; then
 
   echo -e ""
   echo -e "${YELLOW}  [i] TO START THE MONITOR:${NC}"
-  echo -e "      cd $INSTALL_DIR"
-  echo -e "      ./tools/docker/manage.sh run"
+  echo -e "      $INSTALL_DIR/tools/docker/manage.sh run"
   echo -e ""
   echo -e "  Then access: http://<YOUR_SERVER_IP>:8080"
 else

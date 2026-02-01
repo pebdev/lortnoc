@@ -4,19 +4,35 @@
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 cd "$SCRIPT_DIR"
 
-# Resolve Repo Root (Assuming manage.sh is in lortnoc_client/tools/docker)
-REPO_ROOT="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+# Resolve Repo Root (Looking for .git or just going up 3 levels)
+# Structure Dev: lortnoc_client/tools/docker -> ../../../ (Repo Root)
+# Structure Prod: tools/docker -> ../../ (Install Dir)
+ROOT_CANDIDATE_2="$(dirname "$(dirname "$SCRIPT_DIR")")"
+ROOT_CANDIDATE_3="$(dirname "$(dirname "$(dirname "$SCRIPT_DIR")")")"
+
+if [ -d "$ROOT_CANDIDATE_2/lortnoc_core" ]; then
+    REPO_ROOT="$ROOT_CANDIDATE_2"
+    echo "Detected Install Environment (Root: $REPO_ROOT)"
+else
+    REPO_ROOT="$ROOT_CANDIDATE_3"
+    echo "Detected Dev Environment (Root: $REPO_ROOT)"
+fi
 
 IMAGE_NAME="lortnoc-client"
 CONTAINER_NAME="lortnoc-client-app"
+
+# Data Dir (renamed to .data per requirement)
+DATA_DIR="$REPO_ROOT/.data"
 CONFIG_DIR="$REPO_ROOT/config"
+mkdir -p "$DATA_DIR"
 
 # Mount config volume to ensure configuration is available and up-to-date
-DOCKER_ARGS="--rm --name $CONTAINER_NAME -v $CONFIG_DIR:/app/config"
+DOCKER_ARGS="--rm --name $CONTAINER_NAME -v $CONFIG_DIR:/app/config -v $DATA_DIR:/app/data -v /etc/localtime:/etc/localtime:ro"
 
 case "$1" in
   build)
-    # Context must be Repo Root
+    # Context must be Repo Root to include sibling core modules
+    echo "Building from $REPO_ROOT using Dockerfile in $SCRIPT_DIR"
     docker build -t $IMAGE_NAME -f Dockerfile "$REPO_ROOT"
     ;;
   run)
@@ -50,7 +66,7 @@ case "$1" in
     docker rmi $IMAGE_NAME
     ;;
   pylint)
-    pylint --rcfile=../tools/pylint/.pylintrc sources/*.py ../lortnoc_core/*.py
+    pylint --rcfile="$REPO_ROOT/tools/pylint/.pylintrc" "$REPO_ROOT/lortnoc_client/sources/"*.py "$REPO_ROOT/lortnoc_core/"*.py
     ;;
   *)
     echo "Usage: $0 {build|run|run-dev|stop|logs|exec|clean|pylint}"
