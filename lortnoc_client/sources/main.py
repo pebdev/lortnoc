@@ -83,7 +83,7 @@ class LortnocClient:
       sys.exit(1)
 
     # Encryption Key
-    encryption_key = self.config.get("encryption_key")
+    encryption_key = self.config.get("discord", {}).get("encryption_key")
     if not encryption_key:
       self.logger.critical("Encryption Key missing in config.")
       self.logger.critical("Please copy the 'encryption_key' from the Monitor's config.json.")

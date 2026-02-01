@@ -3,12 +3,14 @@
   "admin_discord_id"        : "",
 
   "client_id"               : "",
-  "client_name"             : "Lortnoc-Device",
+  "client_name"             : "",
+
   "heartbeat_interval"      : 300,
   "log_file"                : "/tmp/lortnoc.log",
+
   "discord": {
-    "encryption_key"        : "",
     "token"                 : "",
-    "heartbeat_channel_id"  : ""
+    "heartbeat_channel_id"  : "",
+    "encryption_key"        : ""
   }
 }

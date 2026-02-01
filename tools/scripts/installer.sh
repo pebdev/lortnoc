@@ -177,10 +177,10 @@ if os.path.exists(target):
     t = prompt('Discord Token', hidden=True)
     if t: config['discord']['token'] = t
 
-    c = prompt('Discord heartbeat Channel ID (Heartbeat)')
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)', hidden=True)
     if c: config['discord']['heartbeat_channel_id'] = c
 
-    a = prompt('Discord Admin User ID (for OTP/DM)')
+    a = prompt('Discord Admin User ID (for OTP/DM)', hidden=True)
     if a: config['admin_discord_id'] = a
 
   else:
@@ -190,19 +190,21 @@ if os.path.exists(target):
     t = prompt('Discord Token', hidden=True)
     if t: config['discord']['token'] = t
 
-    c = prompt('Discord heartbeat Channel ID (Heartbeat)')
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)', hidden=True)
     if c: config['discord']['heartbeat_channel_id'] = c
 
   # --- Key Generation / Check ---
-  current_key = config.get('encryption_key', '')
+  current_key = config.get('discord', {}).get('encryption_key', '')
 
   if current_key and len(current_key) > 5:
     print(f'[i] Encryption Key detected: {current_key[:5]}...*****')
   else:
+    if 'discord' not in config: config['discord'] = {}
+    
     if '$COMPONENT' == 'monitor':
       print('[*] Generating New Encryption Key...')
       key = base64.urlsafe_b64encode(os.urandom(32)).decode()
-      config['encryption_key'] = key
+      config['discord']['encryption_key'] = key
       print(f'[+] New Key Generated: {key}')
       print('    !! COPY THIS KEY TO ALL CLIENTS !!')
     else:
@@ -211,7 +213,7 @@ if os.path.exists(target):
       print('[*] Security Setup (Encryption)')
       new_key = prompt('Encryption Key (Copy from Monitor)', hidden=True)
       if new_key:
-        config['encryption_key'] = new_key
+        config['discord']['encryption_key'] = new_key
       else:
         print('[!] Warning: No encryption key provided. Client will not be able to communicate.')
 
