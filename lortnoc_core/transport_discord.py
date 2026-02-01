@@ -73,7 +73,7 @@ class DiscordTransport(Transport):
   async def on_ready (self) -> None:
     """Called when the Discord client is ready."""
 
-    logger.info(f"Connected to Discord as {self.client.user} (ID: {self.client.user.id})")
+    logger.info(f"Connected to Discord as {self.client.user}")
     self._connected = True
 
   # ----------------------------------------------------------------------------------------------------------------------

@@ -121,12 +121,12 @@ class UIManager:
       def form_area():
         if not ls.otp_sent:
           ui.input('Password', password=True).bind_value(ls, 'password').classes(
-            'w-full mb-6').props('outlined autofocus').on('keydown.enter', process_password)
+            'w-full mb-6 text-slate-200').props('outlined autofocus dark inp-class="text-white"').on('keydown.enter', process_password)
           ui.button('Login', on_click=process_password).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
         else:
           ui.label('Enter the 6-digit code sent to Discord').classes('text-sm text-slate-400 mb-4 text-center')
           ui.input('OTP Code').bind_value(ls, 'otp_code').classes(
-            'w-full mb-6').props('outlined autofocus input-class="text-center tracking-widest"').on('keydown.enter', process_otp)
+            'w-full mb-6 text-slate-200').props('outlined autofocus dark input-class="text-center tracking-widest text-white"').on('keydown.enter', process_otp)
           ui.button('Verify', on_click=process_otp).classes('w-full bg-green-600 hover:bg-green-700 text-white font-bold')
           ui.button('Back', on_click=reset_state).classes('w-full mt-2 flat text-slate-500 hover:text-white')
 

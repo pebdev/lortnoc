@@ -40,7 +40,7 @@ CONFIG_DIR="$REPO_ROOT/config"
 mkdir -p "$DATA_DIR"
 
 # Mount config volume to ensure configuration is available and up-to-date
-DOCKER_ARGS="--rm --name $CONTAINER_NAME -v $CONFIG_DIR:/app/config -v $DATA_DIR:/app/.data -v /etc/localtime:/etc/localtime:ro"
+DOCKER_ARGS="--rm -p 8080:8080 --name $CONTAINER_NAME -v $CONFIG_DIR:/app/config -v $DATA_DIR:/app/.data -v /etc/localtime:/etc/localtime:ro"
 
 
 # --- COMMANDS ---------------------------------------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import logging
 import sys
 import os
 import secrets
+import uvicorn
 from datetime import datetime
 import asyncio
 from typing import List, Dict, Optional
@@ -68,23 +69,23 @@ class LortnocMonitor:
 
     # Critical Config Check
     if not self.discord_token:
-      self.logger.critical("[FATAL] 'discord.token' missing in config.json")
+      self.logger.error("[FATAL] 'discord.token' missing in config.json")
       sys.exit(1)
 
     if not self.discord_channel_id:
-      self.logger.critical("[FATAL] 'discord.heartbeat_channel_id' missing in config.json")
+      self.logger.error("[FATAL] 'discord.heartbeat_channel_id' missing in config.json")
       sys.exit(1)
 
     if not self.encryption_key:
-      self.logger.critical("[FATAL] 'discord.encryption_key' missing in config.json")
+      self.logger.error("[FATAL] 'discord.encryption_key' missing in config.json")
       sys.exit(1)
 
     if not self.admin_password:
-      self.logger.critical("[FATAL] 'admin_password' missing in config.json")
+      self.logger.error("[FATAL] 'admin_password' missing in config.json")
       sys.exit(1)
 
     if not self.admin_discord_id:
-      self.logger.critical("[FATAL] 'admin_discord_id' missing in config.json")
+      self.logger.error("[FATAL] 'discord.admin_discord_id' missing in config.json")
       sys.exit(1)
 
     # 2. Paths
@@ -258,9 +259,15 @@ class LortnocMonitor:
 
   # --------------------------------------------------------------------------------------------------------------------
   def trigger_update (self):
-    # Broadcast update to all? Or self update?
-    # Assuming self update based on "System Update"
-    pass
+    """
+    Handles the 'System Update' action.
+    Since the Monitor runs efficiently in Docker, it cannot easily update itself and restart the container.
+    """
+    ui.notify("Update must be performed manually on the server (Docker pull & restart)",
+              type="warning",
+              close_button="OK",
+              multi_line=True,
+              timeout=0)
 
 
 # I N I T ##############################################################################################################
@@ -286,7 +293,7 @@ def setup_app_components (_app: FastAPI, _monitor: LortnocMonitor) -> None:
   """ Sets up the FastAPI application components including middleware and UI."""
 
   # Add Middleware
-  _app.middleware("http")(AuthMiddleware(_app, _monitor))
+  _app.add_middleware(AuthMiddleware, _monitor_app=_monitor)
 
   # Setup UI
   _monitor.ui_manager.setup_ui()
@@ -294,12 +301,38 @@ def setup_app_components (_app: FastAPI, _monitor: LortnocMonitor) -> None:
 
 # M A I N ##############################################################################################################
 if __name__ in {"__main__", "__mp_main__"}:
-  _monitor_instance = LortnocMonitor()
+  try:
+    _monitor_instance = LortnocMonitor()
 
-  # Create FastAPI app with lifespan
-  app_api = FastAPI(lifespan=lifespan)
-  setup_app_components(app_api, _monitor_instance)
+    # Create FastAPI app with lifespan
+    app_api = FastAPI(lifespan=lifespan)
 
-  # Start NiceGUI
-  current_ver = _monitor_instance.current_version if _monitor_instance else "Unknown"
-  ui.run_with(app_api, title=f"Lortnoc Monitor v{current_ver}", storage_secret=secrets.token_hex(16))
+    # 1. Setup Pages (Routes) FIRST
+    _monitor_instance.ui_manager.setup_ui()
+
+    # 2. Add Middleware (Last, to wrap everything)
+    app_api.add_middleware(AuthMiddleware, _monitor_app=_monitor_instance)
+
+    # Start NiceGUI
+    current_ver = _monitor_instance.current_version if _monitor_instance else "Unknown"
+    ui.run_with(app_api, title=f"Lortnoc Monitor {current_ver}", storage_secret=secrets.token_hex(16))
+
+    # Silence noisy loggers (WebSockets, Access, etc)
+    noisy_loggers = [
+      "uvicorn", "uvicorn.access", "uvicorn.error", "uvicorn.asgi",
+      "websockets", "multipart",
+      "engineio", "engineio.server", "socketio", "socketio.server", "socketio.client"
+    ]
+    for _logger_name in noisy_loggers:
+      logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
+    # Force disable uvicorn access logger propagation
+    logging.getLogger("uvicorn.access").handlers = []
+    logging.getLogger("uvicorn.access").propagate = False
+
+    uvicorn.run(app_api, host="0.0.0.0", port=8080, access_log=False)
+
+  except Exception as e:
+    import traceback
+    traceback.print_exc()
+    sys.exit(1)
