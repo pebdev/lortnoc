@@ -1,5 +1,6 @@
 {
   "admin_password"          : "",
+  "totp_secret"             : "",
 
   "client_id"               : "",
   "client_name"             : "",

@@ -411,7 +411,7 @@ class UIManager:
             version_color = 'text-green-400' if not is_outdated and client_ver != 'unknown' else 'text-slate-500'
             if is_outdated:
               version_color = 'text-amber-500'
-            ui.label(f"v{client_ver}").classes(f'text-xs font-mono {version_color} font-bold mr-2')
+            ui.label(client_ver).classes(f'text-xs font-mono {version_color} font-bold mr-2')
 
             ui.separator().props('vertical').classes('h-4 border-slate-700')
 
@@ -475,31 +475,31 @@ class UIManager:
         num /= 1024.0
       return f"{num:.1f} TB"
 
-    with ui.grid(columns=3).classes('w-full gap-4'):
+    with ui.grid(columns=6).classes('w-full gap-2'):
       cpu = client.get("cpu", 0)
-      self._stat_card_big('CPU Load', f"{cpu}%", 'memory', 'blue', cpu / 100)
+      self._stat_card_big('CPU', f"{cpu}%", 'memory', 'blue', cpu / 100)
       ram = client.get("ram", 0)
-      self._stat_card_big('Memory', f"{ram}%", 'sd_storage', 'purple', ram / 100)
+      self._stat_card_big('RAM', f"{ram}%", 'sd_storage', 'purple', ram / 100)
       disk = client.get("disk", 0)
-      self._stat_card_big('Disk Usage', f"{disk}%", 'storage', 'amber', disk / 100)
+      self._stat_card_big('Disk', f"{disk}%", 'storage', 'amber', disk / 100)
       temp = client.get("temp", 0)
-      self._stat_card_big('Temperature', f"{temp}°C", 'thermostat', 'red', temp / 85)
+      self._stat_card_big('Temp', f"{temp}°C", 'thermostat', 'red', temp / 85)
       net_sent = sizeof_fmt(client.get("net_sent", 0))
-      self._stat_card_big('Net Sent', net_sent, 'upload', 'cyan')
+      self._stat_card_big('Up', net_sent, 'upload', 'cyan')
       net_recv = sizeof_fmt(client.get("net_recv", 0))
-      self._stat_card_big('Net Recv', net_recv, 'download', 'cyan')
+      self._stat_card_big('Down', net_recv, 'download', 'cyan')
 
   # --------------------------------------------------------------------------------------------------------------------
   def _stat_card_big (self, title, value, icon, color_name, progress=None):
-    with ui.card().classes(self.THEME['card'].replace('p-4', 'p-3')):
-      with ui.row().classes('justify-between w-full items-center mb-1'):
-        ui.label(title).classes('text-xs text-slate-400 font-medium')
-        ui.icon(icon, color=f'{color_name}-400', size='md')
-      ui.label(value).classes('text-xl font-bold mb-1')
+    with ui.card().classes(self.THEME['card'].replace('p-4', 'p-2').replace('shadow-lg', 'shadow-md')):
+      with ui.row().classes('justify-between w-full items-center mb-0 gap-1 no-wrap'):
+        ui.label(title).classes('text-[10px] text-slate-400 font-bold uppercase truncate')
+        ui.icon(icon, color=f'{color_name}-400', size='xs')
+      ui.label(value).classes('text-base font-bold mb-0 leading-tight truncate')
       if progress is not None:
         ui.linear_progress(progress, show_value=False).props(
-          f'size=4px color={color_name}-400 track-color={color_name}-900'
-        ).classes('rounded-full')
+          f'size=3px color={color_name}-400 track-color={color_name}-900'
+        ).classes('rounded-full mt-1')
 
   # --------------------------------------------------------------------------------------------------------------------
   @ui.refreshable
