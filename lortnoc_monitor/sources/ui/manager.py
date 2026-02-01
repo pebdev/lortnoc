@@ -12,10 +12,10 @@
 # pylint: disable=too-many-statements, too-many-branches, too-many-arguments, too-many-positional-arguments
 
 # I M P O R T ##########################################################################################################
-import secrets
 import uuid
 import sys
 import os
+import pyotp
 from datetime import datetime
 from nicegui import ui
 
@@ -63,10 +63,9 @@ class UIManager:
   def render_login_view (self):
     # Simple state container
     class LoginState:
-      otp_sent = False
-      generated_otp = None
       password = ""
       otp_code = ""
+      step = 1
 
     ls = LoginState()
 
@@ -75,66 +74,51 @@ class UIManager:
       self.monitor.auth_sessions.add(token)
       ui.run_javascript(f'document.cookie = "auth_token={token}; path=/"; window.location.href = "/"')
 
-    async def send_otp_dm(otp):
-      if self.monitor.admin_discord_id:
-        try:
-          uid = int(self.monitor.admin_discord_id)
-          if isinstance(self.monitor.transport, DiscordTransport):
-            success = await self.monitor.transport.send_dm(uid, f"🔑 Lortnoc Login OTP: **{otp}**")
-            return success
-          ui.notify('Discord Transport not active', type='negative')
-        except ValueError:
-          ui.notify('Invalid Admin Discord ID in config', type='negative')
-      else:
-        ui.notify('OTP Required: Admin Discord ID not configured', type='negative')
-      return False
-
-    async def process_password():
+    def check_password():
       if ls.password == self.monitor.admin_password:
-        otp = str(secrets.randbelow(1000000)).zfill(6)
-        ls.generated_otp = otp
-        success = await send_otp_dm(otp)
-
-        if success:
-          ls.otp_sent = True
-          form_area.refresh()
-          ui.notify('OTP sent via DM', type='positive')
-        else:
-          ui.notify('Failed to send OTP (Check Bot DMs)', type='negative')
+        ls.step = 2
+        render_form.refresh()
       else:
         ui.notify('Invalid Password', color='negative')
 
-    def process_otp():
-      if ls.otp_code and ls.otp_code.strip() == ls.generated_otp:
+    def check_totp():
+      if not self.monitor.totp_secret:
+        ui.notify('System Error: No TOTP Secret loaded', color='negative')
+        return
+
+      totp = pyotp.TOTP(self.monitor.totp_secret)
+      if totp.verify(ls.otp_code):
         finalize_login()
       else:
-        ui.notify('Invalid OTP code', color='negative')
-
-    def reset_state():
-      ls.otp_sent = False
-      ls.password = ""
-      ls.otp_code = ""
-      form_area.refresh()
+        ui.notify('Invalid OTP Code', color='negative')
 
     ui.query('.nicegui-content').classes('p-0 m-0 w-full h-screen flex items-center justify-center bg-slate-950')
+
     with ui.card().classes('w-96 p-8 bg-slate-900 border border-slate-800 shadow-xl items-center'):
       ui.icon('lock', size='3rem').classes('text-blue-500 mb-4')
       ui.label('Lortnoc Access').classes('text-xl font-bold text-white mb-6')
 
       @ui.refreshable
-      def form_area():
-        if not ls.otp_sent:
+      def render_form():
+        if ls.step == 1:
+          # Password Input
           ui.input('Password', password=True).bind_value(ls, 'password').classes(
-            'w-full mb-6 text-slate-200').props('outlined autofocus dark inp-class="text-white"').on('keydown.enter', process_password)
-          ui.button('Login', on_click=process_password).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
-        else:
-          ui.label('Enter the 6-digit code sent to Discord').classes('text-sm text-slate-400 mb-4 text-center')
-          ui.input('OTP Code').bind_value(ls, 'otp_code').classes(
-            'w-full mb-6 text-slate-200').props('outlined autofocus dark input-class="text-center tracking-widest text-white"').on('keydown.enter', process_otp)
-          ui.button('Verify', on_click=process_otp).classes('w-full bg-green-600 hover:bg-green-700 text-white font-bold')
-          ui.button('Back', on_click=reset_state).classes('w-full mt-2 flat text-slate-500 hover:text-white')
+            'w-full mb-4 text-slate-200').props(
+              'outlined autofocus dark name="password" autocomplete="current-password"'
+          ).on('keydown.enter', check_password)
 
-      form_area()
+          ui.button('Next', on_click=check_password).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
+        else:
+          # TOTP Input
+          ui.input('2FA Code (Google Auth)').bind_value(ls, 'otp_code').classes(
+            'w-full mb-4 text-slate-200').props(
+              'outlined autofocus dark name="totp" autocomplete="one-time-code" inputmode="numeric"'
+          ).on('keydown.enter', check_totp)
+
+          ui.button('Login', on_click=check_totp).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
+          ui.button('Back', on_click=lambda: [setattr(ls, 'step', 1), render_form.refresh()]).props('flat').classes('w-full mt-2 text-slate-400')
+
+      render_form()
 
   # --------------------------------------------------------------------------------------------------------------------
   def render_main_page (self):

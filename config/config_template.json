@@ -8,7 +8,6 @@
   "log_file"                : "/tmp/lortnoc.log",
 
   "discord": {
-    "admin_discord_id"      : "",
     "token"                 : "",
     "heartbeat_channel_id"  : "",
     "encryption_key"        : ""

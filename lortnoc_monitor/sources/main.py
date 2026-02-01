@@ -15,6 +15,7 @@ import sys
 import os
 import secrets
 import uvicorn
+import pyotp
 from datetime import datetime
 import asyncio
 from typing import List, Dict, Optional
@@ -64,8 +65,12 @@ class LortnocMonitor:
     self.discord_token      = discord_cfg.get("token")
     self.discord_channel_id = discord_cfg.get("heartbeat_channel_id")
     self.encryption_key     = discord_cfg.get("encryption_key")
-    self.admin_discord_id   = discord_cfg.get("admin_discord_id")
     self.admin_password     = self.config.get("admin_password")
+
+    # TOTP Setup
+    self.totp_secret = self.config.get("totp_secret")
+    if not self.totp_secret:
+      self.logger.warning("No TOTP Secret found in config.json. Please run installer to generate one.")
 
     # Critical Config Check
     if not self.discord_token:
@@ -82,10 +87,6 @@ class LortnocMonitor:
 
     if not self.admin_password:
       self.logger.error("[FATAL] 'admin_password' missing in config.json")
-      sys.exit(1)
-
-    if not self.admin_discord_id:
-      self.logger.error("[FATAL] 'discord.admin_discord_id' missing in config.json")
       sys.exit(1)
 
     # 2. Paths
@@ -137,9 +138,13 @@ class LortnocMonitor:
       self.logs.pop(0)
 
     # Notify UI
-    self.ui_manager.refresh_logs()
-    if self.ui_manager.selected_client_id == _client_id:
-      self.ui_manager.refresh_terminal()
+    try:
+      self.ui_manager.refresh_logs()
+      if self.ui_manager.selected_client_id == _client_id:
+        self.ui_manager.refresh_terminal()
+    except Exception:
+      # Safely ignore UI updates if running in background task without client context
+      pass
 
   # --------------------------------------------------------------------------------------------------------------------
   async def startup (self) -> None:
@@ -157,7 +162,7 @@ class LortnocMonitor:
     self.transport.on_message = self.on_transport_message
 
     await self.transport.connect()
-    
+
     # Wait for connection to be ready (up to 10s)
     for _ in range(20):
       if getattr(self.transport, '_connected', False):
@@ -178,7 +183,7 @@ class LortnocMonitor:
       if cmd_channel:
         try:
           self.transport.add_listening_channel(int(cmd_channel))
-          self.send_command(client["id"], "ping")
+          self.send_command(client["id"], "ping", _notify=False)
           count += 1
         except Exception as e:
           self.logger.warning(f"Failed to wake client {client['id']}: {e}")
@@ -260,11 +265,12 @@ class LortnocMonitor:
     self.add_log(data, client_id, _is_output=True)
 
   # --------------------------------------------------------------------------------------------------------------------
-  def send_command (self, _client_id: str, _cmd: str, _args: List[str] = None) -> None:
+  def send_command (self, _client_id: str, _cmd: str, _args: List[str] = None, _notify: bool = True) -> None:
     """ Sends a command to a specific client."""
 
     if not self.transport:
-      ui.notify("Transport not connected", type="negative")
+      if _notify:
+        ui.notify("Transport not connected", type="negative")
       return
 
     # Resolve target channel from client manager
@@ -274,7 +280,10 @@ class LortnocMonitor:
       target_channel = client.get("command_channel_id")
 
     if not target_channel:
-      ui.notify(f"Cannot send command: Unknown route to client {_client_id}", type="negative")
+      if _notify:
+        ui.notify(f"Cannot send command: Unknown route to client {_client_id}", type="negative")
+      else:
+        self.logger.warning(f"Cannot send command to {_client_id}: Unknown route")
       return
 
     payload = {
@@ -293,7 +302,8 @@ class LortnocMonitor:
       self.add_log(f"> {cmd_str}", _client_id, _is_user_input=True)
     else:
       self.add_log(f"Command: {_cmd}", _client_id, _is_user_input=False)
-      ui.notify(f"Sent {_cmd} to {_client_id}")
+      if _notify:
+        ui.notify(f"Sent {_cmd} to {_client_id}")
 
   # --------------------------------------------------------------------------------------------------------------------
   def delete_client (self, _client_id: str) -> None:
@@ -361,7 +371,7 @@ if __name__ in {"__main__", "__mp_main__"}:
 
     # Start NiceGUI
     current_ver = _monitor_instance.current_version if _monitor_instance else "Unknown"
-    ui.run_with(app_api, title=f"Lortnoc Monitor {current_ver}", storage_secret=secrets.token_hex(16))
+    ui.run_with(app_api, title=f"Lortnoc Monitor {current_ver}", favicon='⌘', storage_secret=secrets.token_hex(16))
 
     # Silence noisy loggers (WebSockets, Access, etc)
     noisy_loggers = [

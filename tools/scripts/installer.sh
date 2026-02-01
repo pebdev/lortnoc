@@ -180,8 +180,16 @@ if os.path.exists(target):
     c = prompt('Discord heartbeat Channel ID (Heartbeat)', hidden=True)
     if c: config['discord']['heartbeat_channel_id'] = c
 
-    a = prompt('Discord Admin User ID (for OTP/DM)', hidden=True)
-    if a: config['discord']['admin_discord_id'] = a
+    # --- TOTP Generation ---
+    if 'totp_secret' not in config or not config['totp_secret']:
+      import base64, os
+      # Generate 32-char Base32 secret for TOTP (Google Authenticator compatible)
+      # 20 bytes entropy -> base32 encoded -> string
+      secret = base64.b32encode(os.urandom(20)).decode('utf-8')
+      config['totp_secret'] = secret
+      print('')
+      print(f'[+] Lortnoc TOTP Secret Generated: {secret}')
+      print('    !! ADD THIS KEY TO YOUR AUTHENTICATOR APP !!')
 
   else:
     n = prompt('Lortnoc client name')

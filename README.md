@@ -135,7 +135,7 @@ The configuration is stored in `config/config.json`.
 ```json
 {
   "admin_password"    : "StrongPassword123!",       (Monitor Only)
-  "admin_discord_id"  : "987654321098765432",       (Monitor Only)
+  "totp_secret"       : "JBSWY3DPEHPK3PXP",         (Monitor Only - Base32)
 
   "client_id"         : "173840123-5678",
   "client_name"       : "My-Device-01", 
@@ -151,7 +151,7 @@ The configuration is stored in `config/config.json`.
 ```
 **Fields :**
 * `admin_password`   (Monitor Only) : Password to access the web dashboard.
-* `admin_discord_id` (Monitor Only) : Your Discord User ID (required for OTP).
+* `totp_secret`      (Monitor Only) : **Secret Key for 2FA** (Base32 format). Used to generate TOTP codes with Google Authenticator or similar apps.
 * `client_id`         (Client Only) : **Technical Unique ID**. Auto-generated if empty. Used for routing.
 * `client_name`       (Client Only) : **Display Name**. Used in the Dashboard.
 * `heartbeat_interval`              : Interval (in seconds) between heartbeats.
@@ -160,16 +160,22 @@ The configuration is stored in `config/config.json`.
 * `discord.heartbeat_channel_id`    : The centralized channel ID.
 * `encryption_key`                  : Key for End-to-End Encryption (See Security section).
 
-## 🔒 Security (End-to-End Encryption)
+## 🔒 Security (Encryption & Auth)
 
+### 1. End-to-End Encryption
 **Encryption is MANDATORY.** All communications between Monitor and Clients are encrypted using AES (Fernet).
 
-### Automatic Setup (First Run)
+**Automatic Setup (First Run)**:
 1.  **Monitor**: When you start the Monitor for the first time, it will **automatically generate** a secure `encryption_key`.
     *   *Check the Monitor logs or the config file to retrieve this key.*
 2.  **Clients**: You **must copy** this `encryption_key` into the `config/config.json` of every Client you deploy. The Client will refuse to start without it.
 
-### Manual Key Generation (Reset)
+### 2. Two-Factor Authentication (2FA)
+Access to the Monitor dashboard is protected by a standard **2FA (TOTP)** system compatible with apps like **Google Authenticator**.
+
+*   During installation via `installer.sh`, a **TOTP Secret** is automatically generated in `config.json`.
+*   You must import this secret into your authenticator app (use the generated secret string).
+*   *Note: If you install manually, you must generate a valid Base32 secret yourself.*
 If you need to regenerate the key (e.g. compromised):
 
 1.  **Generate a new Key**:

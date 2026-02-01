@@ -221,32 +221,6 @@ class DiscordTransport(Transport):
       logger.error(f"Channel {target_channel_id} not found.")
 
   # ----------------------------------------------------------------------------------------------------------------------
-  async def send_dm (self, _user_id: int, _message: str) -> bool:
-    """
-    Sends a Direct Message (DM) to a specific Discord User.
-    Useful for sensitive notifications like OTP.
-    """
-
-    if not self._connected:
-      logger.warning("Discord not connected. Cannot send DM.")
-      return False
-
-    try:
-      user = await self.client.fetch_user(_user_id)
-      if user:
-        await user.send(_message)
-        return True
-
-      logger.error(f"User ID {_user_id} not found.")
-      return False
-    except discord.Forbidden:
-      logger.error(f"Cannot send DM to user {_user_id}. Bot might be blocked or DM disabled.")
-      return False
-    except Exception as e:
-      logger.error(f"Failed to send DM to {_user_id}: {e}")
-      return False
-
-  # ----------------------------------------------------------------------------------------------------------------------
   async def _send_chunked (self, _channel: discord.TextChannel, _payload: str) -> None:
     """Sends a payload to a Discord channel. Uses file attachment if too large."""
 
