@@ -4,6 +4,10 @@
 # Author  : PEB <pebdev@lavache.com>
 # Date    : 29.01.2026
 ########################################################################################################################
+# Copyright (C) 2026
+# This file is copyright under the latest version of the EUPL.
+# Please see LICENSE file for your rights under this license.
+########################################################################################################################
 # Installer expects: <component> <install_dir>
 set -e
 

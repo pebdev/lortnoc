@@ -12,9 +12,6 @@
 # I M P O R T ##########################################################################################################
 import sys
 import os
-import json
-import random
-import string
 import asyncio
 import logging
 import platform
@@ -35,7 +32,7 @@ try:
   from lortnoc_core.logger import setup_logging
   from lortnoc_core.config import load_config
 except ImportError as e:
-  print(f"Error: lortnoc_core module not found or import error: {e}")
+  logging.critical(f"Error: lortnoc_core module not found or import error: {e}")
   sys.exit(1)
 
 
@@ -48,51 +45,64 @@ class LortnocClient:
 
   # ----------------------------------------------------------------------------------------------------------------------
   def __init__ (self) -> None:
-    # Load Config
+    # 1. Load Config & Logging
     self.config = load_config()
     setup_logging(self.config.get("log_file", "/tmp/lortnoc.log"))
     self.logger = logging.getLogger("lortnoc-client")
 
-    # Paths
-    self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../data'))
-    self.identity_file = os.path.join(self.data_dir, 'identity.json')
+    # 2. Paths
+    self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.data'))
+    if not os.path.exists(self.data_dir):
+      os.makedirs(self.data_dir)
 
-    # Identity Resolution
-    # If client_name is manually set in config, we trust it (user responsible for uniqueness).
-    # If not, we use hostname AND append a persistent random suffix to avoid collisions (e.g. mass deployment).
-    if self.config.get("client_name"):
-      self.client_id = self.config.get("client_name")
-    else:
-      self.client_id = self._get_or_create_identity_with_suffix()
-
-    self.os_info = f"{platform.system()} {platform.release()}"
-    self.cmd_channel_id = None
-
-    # Config Validation --------------------------------------------------------------------------------------------------
-    token = self.config.get("discord", {}).get("token")
-    if not token:
-      sys.stderr.write("[FATAL] Discord Token is missing in config.json.\n")
+    # 3. Configuration Validation
+    # ---------------------------
+    # Client ID
+    self.client_id = self.config.get("client_id")
+    if not self.client_id:
+      self.logger.critical("'client_id' is missing in config.json.")
+      self.logger.critical("Please reinstall or manually add a unique ID.")
       sys.exit(1)
 
+    # Discord Token
+    token = self.config.get("discord", {}).get("token")
+    if not token:
+      self.logger.critical("Discord Token is missing in config.json.")
+      sys.exit(1)
+
+    # Heartbeat Channel
     hb_id = self.config.get("discord", {}).get("heartbeat_channel_id")
     if not hb_id:
-      sys.stderr.write("[FATAL] Heartbeat Channel ID is missing in config.json.\n")
+      self.logger.critical("Heartbeat Channel ID is missing in config.json.")
       sys.exit(1)
 
     try:
       self.heartbeat_channel_id = int(hb_id)
     except ValueError:
-      sys.stderr.write(f"[FATAL] Invalid Heartbeat Channel ID: '{hb_id}'. Must be a number.\n")
+      self.logger.critical(f"Invalid Heartbeat Channel ID: '{hb_id}'. Must be a number.")
       sys.exit(1)
 
-    # --------------------------------------------------------------------------------------------------------------------
+    # Encryption Key
+    encryption_key = self.config.get("encryption_key")
+    if not encryption_key:
+      self.logger.critical("Encryption Key missing in config.")
+      self.logger.critical("Please copy the 'encryption_key' from the Monitor's config.json.")
+      sys.exit(1)
 
-    # Transport Init
+    # 4. Initialization
+    # -----------------
+    self.client_name = self.config.get("client_name", "Unknown-Device")
+    self.logger.info(f"Identity: {self.client_name} ({self.client_id})")
+
+    self.os_info = f"{platform.system()} {platform.release()}"
+    self.cmd_channel_id = None
+
+    # Transport
     # Initial listen list is empty (will dynamic add own channel) or legacy
     legacy_id = self.config.get("discord", {}).get("channel_id")
     channels_to_listen = [int(legacy_id)] if legacy_id else []
 
-    self.transport = DiscordTransport(token, channels_to_listen)
+    self.transport = DiscordTransport(token, channels_to_listen, _encryption_key=encryption_key)
     self.transport.set_callback(self.handle_message)
 
     # Version Resolution
@@ -133,42 +143,10 @@ class LortnocClient:
     """Waits until transport is fully connected."""
     self.logger.info("Waiting for transport connection...")
     while True:
-      # pylint: disable=protected-access
       if isinstance(self.transport, DiscordTransport) and self.transport._connected:
         break
       await asyncio.sleep(1)
 
-  # I D E N T I T Y   M G M T ------------------------------------------------------------------------------------------
-  def _get_or_create_identity_with_suffix (self) -> str:
-    """Generates or loads a unique ID based on hostname + random suffix."""
-    hostname = socket.gethostname()
-
-    # Try load existing identity
-    if os.path.exists(self.identity_file):
-      try:
-        with open(self.identity_file, 'r', encoding='utf-8') as f:
-          data = json.load(f)
-          if data.get('base_name') == hostname:
-            return data.get('client_id')
-      except Exception:
-        pass # Corrupt file, regenerate
-
-    # Generate new unique suffix
-    suffix = ''.join(random.choices(string.ascii_lowercase + string.digits, k=4))
-    unique_id = f"{hostname}-{suffix}"
-
-    self.logger.info(f"Generated new unique identity: {unique_id}")
-
-    # Save
-    try:
-      if not os.path.exists(self.data_dir):
-        os.makedirs(self.data_dir)
-      with open(self.identity_file, 'w', encoding='utf-8') as f:
-        json.dump({'client_id': unique_id, 'base_name': hostname}, f)
-    except Exception as e:
-      self.logger.error(f"Failed to persist identity: {e}")
-
-    return unique_id
 
   # C H A N N E L   M G M T --------------------------------------------------------------------------------------------
   async def _setup_command_channel (self) -> None:
@@ -183,7 +161,6 @@ class LortnocClient:
         return
 
       guild = guilds[0] # Assume first guild
-      # target_name = f"cmd-{self.client_id.lower().replace('.', '-')}"
       target_name = self.client_id.lower().replace('.', '-')
 
       # Check existence
@@ -240,16 +217,16 @@ class LortnocClient:
 
   # C O M M A N D S ----------------------------------------------------------------------------------------------------
   async def handle_message (self, _msg: dict) -> None:
+    """Handles incoming messages from the transport."""
     # Only process commands targeting us
     if _msg.get('type') != 'command' or _msg.get('target_id') != self.client_id:
       return
 
-    action = _msg.get('action')
-    args = _msg.get('args', [])
+    result    = "Done"
+    is_error  = False
+    action    = _msg.get('action')
+    args      = _msg.get('args', [])
     self.logger.info(f"Received command: {action} {args}")
-
-    result = "Done"
-    is_error = False
 
     try:
       if action == 'reboot':
@@ -262,25 +239,13 @@ class LortnocClient:
         result, is_error = await self._exec_shell(args[0] if args else "")
       elif action == 'update':
         # Trigger Self-Update via the installer script
-        # 1. Download installer
-        # 2. Execute it
-
-        # Determine installation root (where main.py is relative to root)
-        # ../../lortnoc_client/sources/main.py -> repo_root is ../..
-        # But we want to call the Update Script with the current directory as target.
-        # Ideally, we call the script from the web to be stateless or use a local copy if we shipped it.
-        # But since we moved to "GitHub Release" model, we should download the latest installer.
-
-        # Get install dir: parent of lortnoc_client
-        # sources/main.py -> lortnoc_client -> root
-        current_file = os.path.abspath(__file__)
-        client_dir = os.path.dirname(os.path.dirname(current_file)) # .../lortnoc_client
-        install_root = os.path.dirname(client_dir) # The directory containing lortnoc_client
-
-        installer_url = "https://raw.githubusercontent.com/peb/lortnoc/master/tools/installers/install_client.sh"
-        cmd = f"curl -sL {installer_url} | bash -s -- {install_root}"
-
-        result = "Update initiated via Installer. Service will restart..."
+        current_file  = os.path.abspath(__file__)
+        client_dir    = os.path.dirname(os.path.dirname(current_file)) # .../lortnoc_client
+        install_root  = os.path.dirname(client_dir) # The directory containing lortnoc_client
+        installer_url = "https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/scripts/installer.sh"
+        # Usage: installer.sh <component> <target_dir> <mode>
+        cmd     = f"curl -sL {installer_url} | bash -s -- client {install_root} --update-runtime"
+        result  = "Update initiated via Installer. Service will restart..."
         asyncio.create_task(self._delayed_exec(cmd, 1))
 
       elif action == 'ping':
@@ -307,8 +272,10 @@ class LortnocClient:
       "_target_channel_id": origin_channel
     })
 
+
   # H E L P E R S ------------------------------------------------------------------------------------------------------
   async def _exec_shell (self, cmd: str) -> (str, bool):
+    """Executes a shell command and returns output and error status."""
     if not cmd:
       return "No command provided", True
 
@@ -328,17 +295,25 @@ class LortnocClient:
 
   # --------------------------------------------------------------------------------------------------------------------
   async def _delayed_exec (self, command: str, delay: int) -> None:
+    """Executes a shell command after a delay."""
     await asyncio.sleep(delay)
     await self._exec_shell(command)
 
   # --------------------------------------------------------------------------------------------------------------------
   async def _get_system_stats (self) -> dict:
-    cpu = psutil.cpu_percent(interval=None)
-    ram = psutil.virtual_memory().percent
+    """Gathers system statistics."""
+
+    cpu   = psutil.cpu_percent(interval=None)
+    ram   = psutil.virtual_memory().percent
+    disk  = psutil.disk_usage('/').percent
+    net   = psutil.net_io_counters()
 
     return {
       "cpu": cpu,
       "ram": ram,
+      "disk": disk,
+      "net_sent": net.bytes_sent,
+      "net_recv": net.bytes_recv,
       "temp": self._get_cpu_temp(),
       "ip": self._get_ip_address()
     }

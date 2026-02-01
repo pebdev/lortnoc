@@ -17,6 +17,8 @@ import asyncio
 import io
 import discord
 
+from cryptography.fernet import Fernet, InvalidToken
+
 from .transport_interface import Transport
 
 
@@ -32,13 +34,24 @@ class DiscordTransport(Transport):
   """
 
   # ----------------------------------------------------------------------------------------------------------------------
-  def __init__ (self, _token: str, _listening_channels: Optional[list[int]] = None) -> None:
+  def __init__ (self, _token: str, _listening_channels: Optional[list[int]] = None, _encryption_key: str = None) -> None:
     if not discord:
       raise ImportError("discord.py is not installed. Please install it with `pip install discord.py`.")
 
     super().__init__()
     self.token = _token
     self.listening_channels = _listening_channels if _listening_channels else []
+
+    # Encryption Setup
+    if not _encryption_key:
+      raise ValueError("Encryption Key is MANDATORY. Please configure 'encryption_key' in your config.")
+
+    try:
+      self.cipher_suite = Fernet(_encryption_key.encode())
+      logger.info("End-to-End Encryption ENABLED.")
+    except Exception as e:
+      logger.critical(f"Invalid Encryption Key: {e}")
+      raise ValueError(f"Invalid Encryption Key provided: {e}") from e
 
     # Configure Intents
     intents = discord.Intents.default()
@@ -55,7 +68,6 @@ class DiscordTransport(Transport):
 
     self.client.event(self.on_ready)
     self.client.event(on_message)
-
     self._connected = False
 
   # ----------------------------------------------------------------------------------------------------------------------
@@ -73,12 +85,29 @@ class DiscordTransport(Transport):
     if _message.channel.id not in self.listening_channels:
       return
 
-    json_str = await self._extract_json_from_message(_message)
-    if not json_str:
+    payload_str = await self._extract_content_from_message(_message)
+    if not payload_str:
+      return
+
+    # Decryption Layer
+    final_json_str = payload_str
+
+    try:
+      # Note: Discord messages are strings, but Fernet needs bytes (base64 token)
+      # We assume the content IS the token
+      # Strip potential markdown code blocks if any (though usually encrypted blobs are raw)
+      clean_token     = payload_str.replace('```', '').strip()
+      decrypted_bytes = self.cipher_suite.decrypt(clean_token.encode('utf-8'))
+      final_json_str  = decrypted_bytes.decode('utf-8')
+    except InvalidToken:
+      logger.warning("Received undecryptable message (Invalid Token/Key). Ignoring.")
+      return
+    except Exception as e:
+      logger.error(f"Decryption error: {e}")
       return
 
     try:
-      data = json.loads(json_str)
+      data = json.loads(final_json_str)
       # Inject origin channel ID for reply routing
       if isinstance(data, dict):
         data['_origin_channel_id'] = _message.channel.id
@@ -92,24 +121,22 @@ class DiscordTransport(Transport):
       pass
 
   # ----------------------------------------------------------------------------------------------------------------------
-  async def _extract_json_from_message (self, _message) -> Optional[str]:
-    """Helper to extract JSON string from message attachments or content."""
+  async def _extract_content_from_message (self, _message) -> Optional[str]:
+    """Helper to extract raw content (JSON or Encrypted Token) from message."""
 
     # 1. Handle Attachments (Priority)
     if _message.attachments:
       for attachment in _message.attachments:
-        if attachment.filename.endswith('.json') or \
-           attachment.content_type.startswith('text') or \
-           attachment.content_type.startswith('application/json'):
-          try:
-            file_content = await attachment.read()
-            return file_content.decode('utf-8')
-          except Exception as e:
-            logger.warning(f"Failed to read attachment {attachment.filename}: {e}")
+        try:
+          file_content = await attachment.read()
+          return file_content.decode('utf-8')
+        except Exception as e:
+          logger.warning(f"Failed to read attachment {attachment.filename}: {e}")
 
-    # 2. Handle Text Content (Fallback)
+    # 2. Handle Text Content
     if _message.content:
       content = _message.content.strip()
+      # Strip common markdown wrappers if present
       if content.startswith("```json") and content.endswith("```"):
         return content[7:-3].strip()
       if content.startswith("```") and content.endswith("```"):
@@ -182,47 +209,42 @@ class DiscordTransport(Transport):
         return
 
     if channel:
-      payload = json.dumps(_message)
-      await self._send_chunked(channel, payload)
+      payload_str = json.dumps(_message)
+
+      # Encryption Layer (Mandatory)
+      # Encrypt the JSON string
+      # Result is bytes, decode to string for transport
+      encrypted_bytes = self.cipher_suite.encrypt(payload_str.encode('utf-8'))
+      payload_str = encrypted_bytes.decode('utf-8')
+
+      await self._send_chunked(channel, payload_str)
     else:
       logger.error(f"Channel {target_channel_id} not found.")
 
   # ----------------------------------------------------------------------------------------------------------------------
-  async def send_message_to_channel_name (self, _channel_name: str, _message: str) -> bool:
+  async def send_dm (self, _user_id: int, _message: str) -> bool:
     """
-    Finds a channel by name and sends a message (string text).
-    Creates the channel if it doesn't exist (in the first available guild).
+    Sends a Direct Message (DM) to a specific Discord User.
+    Useful for sensitive notifications like OTP.
     """
 
-    if not self._connected or not self.client.guilds:
-      logger.warning("Discord not connected or no guilds found.")
+    if not self._connected:
+      logger.warning("Discord not connected. Cannot send DM.")
       return False
 
-    # Try to find channel in any guild
-    target_channel = None
-    for guild in self.client.guilds:
-      target_channel = discord.utils.get(guild.text_channels, name=_channel_name)
-      if target_channel:
-        break
-
-    # If not found, create in the first guild
-    if not target_channel:
-      guild = self.client.guilds[0]
-      try:
-        logger.info(f"Channel '{_channel_name}' not found. Creating in guild '{guild.name}'.")
-        target_channel = await guild.create_text_channel(_channel_name)
-      except discord.Forbidden:
-        logger.error(f"Missing permissions to create channel '{_channel_name}' in guild '{guild.name}'")
-        return False
-      except Exception as e:
-        logger.error(f"Failed to create channel: {e}")
-        return False
-
     try:
-      await target_channel.send(_message)
-      return True
+      user = await self.client.fetch_user(_user_id)
+      if user:
+        await user.send(_message)
+        return True
+
+      logger.error(f"User ID {_user_id} not found.")
+      return False
+    except discord.Forbidden:
+      logger.error(f"Cannot send DM to user {_user_id}. Bot might be blocked or DM disabled.")
+      return False
     except Exception as e:
-      logger.error(f"Failed to send message to named channel '{_channel_name}': {e}")
+      logger.error(f"Failed to send DM to {_user_id}: {e}")
       return False
 
   # ----------------------------------------------------------------------------------------------------------------------
@@ -231,19 +253,21 @@ class DiscordTransport(Transport):
 
     max_chunk_size = 1900
 
-    # 1. Small Payload: Send as text block (Preferred for speed/readability)
+    # 1. Small Payload
     if len(_payload) <= max_chunk_size:
-      await _channel.send(f"```json\n{_payload}\n```")
+      # If Encrypted, we don't need ```json wrapper, it's just a blob.
+      # But keeping code block makes it copy-pasteable monospaced.
+      await _channel.send(f"```\n{_payload}\n```")
       return
 
     # 2. Large Payload: Send as File Attachment
-    # Discord supports 10MB+ files, which is plenty for text logs.
     try:
       with io.BytesIO(_payload.encode('utf-8')) as f:
-        file_obj = discord.File(f, filename="payload.json")
+        # Extension .bin for encrypted to avoid preview parsing attempts
+        filename = "payload.bin"
+
+        file_obj = discord.File(f, filename=filename)
         await _channel.send(content="[LARGE PAYLOAD] See attachment.", file=file_obj)
     except Exception as e:
       logger.error(f"Failed to send large payload as attachment: {e}")
-      # Last resort error
-      error_msg = json.dumps({"type": "log", "message": f"\n[ERROR] Payload too large and attachment failed: {e}"})
-      await _channel.send(f"```json\n{error_msg}\n```")
+      # Last resort error (Attempt to send log about failure) -> Only if not recursive

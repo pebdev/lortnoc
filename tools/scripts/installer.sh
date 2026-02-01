@@ -148,24 +148,60 @@ if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
     echo -e "${RED}[!] Template file missing. Configuration initialization failed.${NC}"
   fi
 
-  # Only attempt interactive setup if we have a TTY (terminal) or direct access to /dev/tty
-  if [ -c /dev/tty ]; then
+if [ -c /dev/tty ]; then
     echo -e "${YELLOW}[*] Starting Interactive Configuration...${NC}"
+
+    # Install cryptography if missing for key generation
+    pip3 install cryptography --quiet &>/dev/null || true
+
     python3 -c "
-import json, os
+import json, os, sys
+try:
+  from cryptography.fernet import Fernet
+except ImportError:
+  Fernet = None
+
 target = '$INSTALL_DIR/config/$CONFIG_FILE'
 
 if os.path.exists(target):
   with open(target, 'r') as f: config = json.load(f)
 
+  # --- Prompting for Core Details ---
   if '$COMPONENT' == 'monitor':
     config['discord']['token'] = input('Discord Token: ')
     config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
     config['admin_password'] = input('Admin Password: ')
+    config['admin_discord_id'] = input('Admin User ID (for OTP/DM): ')
   else:
     config['client_name'] = input('Client Name: ')
     config['discord']['token'] = input('Discord Token: ')
     config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
+
+  # --- Key Generation / Check ---
+  current_key = config.get('encryption_key', '')
+
+  if current_key:
+     print(f'[i] Encryption Key detected: {current_key[:10]}...')
+  else:
+    if '$COMPONENT' == 'monitor':
+       if Fernet:
+         print('[*] Generating New Encryption Key...')
+         key = Fernet.generate_key().decode()
+         config['encryption_key'] = key
+         print(f'[+] New Key Generated: {key}')
+         print('    !! COPY THIS KEY TO ALL CLIENTS !!')
+       else:
+         print('[!] Warning: cryptography module missing. Cannot generate key automatically.')
+         print('    Run: pip install cryptography')
+    else:
+       # For Client, we must ask for the key
+       print('')
+       print('[*] Security Setup (Encryption)')
+       new_key = input('Encryption Key (Copy from Monitor): ').strip()
+       if new_key:
+         config['encryption_key'] = new_key
+       else:
+         print('[!] Warning: No encryption key provided. Client will not be able to communicate.')
 
   with open(target, 'w') as f: json.dump(config, f, indent=2)
   print('[+] Config updated.')
@@ -179,6 +215,30 @@ if os.path.exists(target):
   fi
 fi
 
+# Client ID Generation (Client Only)
+if [ "$COMPONENT" == "client" ]; then
+  CONF_PATH="$INSTALL_DIR/config/$CONFIG_FILE"
+  if [ -f "$CONF_PATH" ]; then
+    # Check if client_id is set or empty
+    CURRENT_ID=$(grep '"client_id"' "$CONF_PATH" | head -1 | cut -d':' -f2 | tr -d '", ')
+
+    if [ -z "$CURRENT_ID" ]; then
+      echo -e "${YELLOW}[*] Generating unique system Client ID...${NC}"
+      # Generates a random ID (Timestamp + Random)
+      NEW_ID="$(date +%s)-$RANDOM"
+
+      # Use temp file for sed to handle both Linux and macOS
+      sed "s/\"client_id\"[[:space:]]*:[[:space:]]*\"\"/\"client_id\" : \"$NEW_ID\"/" "$CONF_PATH" > "$CONF_PATH.tmp" && mv "$CONF_PATH.tmp" "$CONF_PATH"
+      echo -e "    Assigned ID: $NEW_ID"
+    fi
+  fi
+fi
+
+# Secure the config file
+if [ -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
+  chmod 600 "$INSTALL_DIR/config/$CONFIG_FILE"
+  echo -e "${GREEN}[*] Config file permissions secured.${NC}"
+fi
 
 # Save Version immediately after install so it's available for Docker build
 echo "$LATEST_VERSION" > "$INSTALL_DIR/VERSION"
