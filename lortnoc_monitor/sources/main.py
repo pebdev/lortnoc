@@ -15,12 +15,14 @@ import sys
 import os
 import json
 import uuid
+import secrets
 from datetime import datetime
 import asyncio
+import aiohttp
 from typing import List, Dict, Any, Optional
 from nicegui import ui, app
 from fastapi import Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 # Import Transport
@@ -82,6 +84,11 @@ class LortnocMonitor:
   # Auth State
   AUTH_SESSIONS = set() # Stores valid session tokens
 
+  # Update Status
+  latest_version = "Checking..."
+  current_version = "Unknown"
+  update_available = False
+
   # ----------------------------------------------------------------------------------------------------------------------
   def __init__ (self) -> None:
     # Load Config
@@ -91,6 +98,7 @@ class LortnocMonitor:
 
     # Auth Config
     self.admin_password = self.config.get("admin_password")
+    self.otp_enabled = self.config.get("otp_enabled", False)
     if not self.admin_password:
       # If no password set, warn but allow (or default to 'admin')
       self.logger.warning("No 'admin_password' in config. Authentication DISABLED.")
@@ -99,9 +107,24 @@ class LortnocMonitor:
     self.logger.info("Running in PRODUCTION MODE (Discord)")
     discord_conf = self.config.get("discord", {})
     token = discord_conf.get("token")
+    hb_id = discord_conf.get("heartbeat_channel_id")
+
+    # Critical Config Validation
+    if not token:
+      self.logger.critical("Discord Token is missing in config. Exiting.")
+      sys.exit(1)
+
+    if not hb_id:
+      self.logger.critical("Heartbeat Channel ID is missing in config. Exiting.")
+      sys.exit(1)
 
     # Load persisted clients first to get their channels
     self.clients: List[Dict[str, Any]] = self._load_persisted_clients()
+
+    # Version State
+    self.current_version = "Unknown"
+    self.latest_version = "Unknown"
+    self.update_available = False
 
     # Monitor listens to EVERYTHING: Heartbeats AND Commands (for feedback logs)
     # Use a set to automatically deduplicate channel IDs
@@ -194,6 +217,7 @@ class LortnocMonitor:
       existing.update(payload)
       existing['status'] = payload['status']
       existing['name'] = _msg.get('client_name', existing['name'])
+      existing['last_seen'] = datetime.now()
 
       # DYNAMIC LISTENING: If monitor isn't listening to this channel yet, add it!
       if 'command_channel_id' in payload:
@@ -210,6 +234,7 @@ class LortnocMonitor:
         "id": cid,
         "name": _msg.get('client_name', cid),
         "command_channel_id": cmd_channel,
+        "last_seen": datetime.now(),
         **payload
       }
       # DYNAMIC LISTENING for new clients
@@ -314,36 +339,12 @@ class LortnocMonitor:
 
   # ----------------------------------------------------------------------------------------------------------------------
   def trigger_update (self) -> None:
-    async def run_update ():
-      ui.notify('Update initiated...', type='info')
-      try:
-        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tools/update.sh'))
-        if not os.path.exists(script_path):
-          ui.notify(f'Update script missing at {script_path}', type='negative')
-          return
-
-        proc = await asyncio.create_subprocess_exec(
-          script_path, 'monitor',
-          stdout=asyncio.subprocess.PIPE,
-          stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await proc.communicate()
-
-        if proc.returncode == 0:
-          ui.notify('Update successful! Restarting...', type='positive')
-        else:
-          err_msg = stderr.decode().strip() or stdout.decode().strip() or "Unknown error"
-          ui.notify(f'Update failed: {err_msg}', type='negative', multi_line=True)
-
-      except Exception as e:
-        ui.notify(f'Error: {str(e)}', type='negative')
-
-    with ui.dialog() as dialog, ui.card().classes('bg-slate-900 border border-slate-700'):
-      ui.label('System Update').classes('text-lg font-bold text-white')
-      ui.label('Pull latest code and restart service?').classes('text-sm text-slate-400')
-      with ui.row().classes('w-full justify-end mt-4'):
-        ui.button('Cancel', on_click=dialog.close).props('flat text-color=white')
-        ui.button('Update', on_click=lambda: [dialog.close(), run_update()]).props('color=warning')
+    with ui.dialog() as dialog, ui.card().classes('bg-slate-900 border border-slate-700 p-6'):
+      ui.label('Update Monitor').classes('text-lg font-bold text-white mb-2')
+      ui.label('The monitor allows running in a container, so it cannot update itself autonomously.').classes('text-sm text-slate-400 mb-2')
+      ui.html('To update, please run this command on the host:<br/><div class="mt-2 p-3 bg-black rounded font-mono text-xs select-all text-green-400">curl -sL https://raw.githubusercontent.com/lortnoc/lortnoc/main/tools/installers/install_monitor.sh | bash</div>').classes('text-sm text-slate-300')
+      with ui.row().classes('w-full justify-end mt-6'):
+        ui.button('Close', on_click=dialog.close).props('color=primary')
     dialog.open()
 
 
@@ -354,21 +355,72 @@ class LortnocMonitor:
     # ------------------------------------------------------------------------------------------------------------------
     @ui.page('/login')
     def login_view () -> None:
-      def try_login():
-        if pwd_input.value == self.admin_password:
-          token = str(uuid.uuid4())
-          self.AUTH_SESSIONS.add(token)
-          ui.run_javascript(f'document.cookie = "auth_token={token}; path=/"; window.location.href = "/"')
+      # Simple state container
+      class LoginState:
+        otp_sent = False
+        generated_otp = None
+        password = ""
+        otp_code = ""
+
+      ls = LoginState()
+
+      def finalize_login():
+        token = str(uuid.uuid4())
+        self.AUTH_SESSIONS.add(token)
+        ui.run_javascript(f'document.cookie = "auth_token={token}; path=/"; window.location.href = "/"')
+
+      async def process_password():
+        if ls.password == self.admin_password:
+          if not self.otp_enabled:
+            finalize_login()
+          else:
+            # Generate OTP
+            otp = str(secrets.randbelow(1000000)).zfill(6)
+            ls.generated_otp = otp
+
+            # Send to Discord
+            success = await self.transport.send_message_to_channel_name("authentication", f"🔑 Lortnoc Login OTP: **{otp}**")
+
+            if success:
+              ls.otp_sent = True
+              form_area.refresh()
+              ui.notify('OTP sent to Discord', type='positive')
+            else:
+              ui.notify('Failed to send OTP (Discord Error)', type='negative')
         else:
           ui.notify('Invalid Password', color='negative')
+
+      def process_otp():
+        # Simple string comparison
+        if ls.otp_code and ls.otp_code.strip() == ls.generated_otp:
+          finalize_login()
+        else:
+          ui.notify('Invalid OTP code', color='negative')
+
+      def reset_state():
+        ls.otp_sent = False
+        ls.password = ""
+        ls.otp_code = ""
+        form_area.refresh()
 
       # Use h-screen to ensure full viewport height for centering
       ui.query('.nicegui-content').classes('p-0 m-0 w-full h-screen flex items-center justify-center bg-slate-950')
       with ui.card().classes('w-96 p-8 bg-slate-900 border border-slate-800 shadow-xl items-center'):
         ui.icon('lock', size='3rem').classes('text-blue-500 mb-4')
         ui.label('Lortnoc Access').classes('text-xl font-bold text-white mb-6')
-        pwd_input = ui.input('Password', password=True).classes('w-full mb-6').props('outlined autofocus').on('keydown.enter', try_login)
-        ui.button('Login', on_click=try_login).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
+
+        @ui.refreshable
+        def form_area():
+          if not ls.otp_sent:
+            ui.input('Password', password=True).bind_value(ls, 'password').classes('w-full mb-6').props('outlined autofocus').on('keydown.enter', process_password)
+            ui.button('Login', on_click=process_password).classes('w-full bg-blue-600 hover:bg-blue-700 text-white font-bold')
+          else:
+            ui.label('Enter the 6-digit code sent to Discord').classes('text-sm text-slate-400 mb-4 text-center')
+            ui.input('OTP Code').bind_value(ls, 'otp_code').classes('w-full mb-6').props('outlined autofocus input-class="text-center tracking-widest"').on('keydown.enter', process_otp)
+            ui.button('Verify', on_click=process_otp).classes('w-full bg-green-600 hover:bg-green-700 text-white font-bold')
+            ui.button('Back', on_click=reset_state).classes('w-full mt-2 flat text-slate-500 hover:text-white')
+
+        form_area()
 
     # ------------------------------------------------------------------------------------------------------------------
     @ui.page('/')
@@ -407,8 +459,13 @@ class LortnocMonitor:
           # System Footer
           ui.separator().classes('border-slate-800')
           with ui.row().classes('w-full justify-between items-center'):
-            ui.label('v2.0.0').classes('text-xs text-slate-600 font-mono')
-            ui.button(icon='system_update_alt', on_click=self.trigger_update).props('flat round dense color=slate-500').tooltip('Update Monitor System')
+            # Only display version if known, otherwise hide or show as Dev
+            ui.label().classes('text-xs text-slate-600 font-mono').bind_text_from(
+                self, 'current_version',
+                backward=lambda v: f"v{v}" if v and v.lower() != "unknown" else "Dev"
+            )
+            # Dynamic Update Button Component
+            self.render_system_update_btn()
 
         # Content
         # We use a simple flex column that fills the screen. Overflow hidden preventing the window scrollbar.
@@ -439,6 +496,16 @@ class LortnocMonitor:
 
 
   # C O M P O N E N T S (Refreshable wrappers) --------------------------------------------------------------------------
+  @ui.refreshable
+  def render_system_update_btn(self) -> None:
+      if not self.update_available:
+        return
+
+      # Use system_update instead of system_update_alt
+      with ui.button(icon='system_update', on_click=self.trigger_update) \
+               .props('round dense color=green'):
+          ui.tooltip('Update Available!')
+
   @ui.refreshable
   def render_sidebar_list (self) -> None:
     ui.label('DEVICES').classes('text-xs font-bold text-slate-500 tracking-wider')
@@ -602,6 +669,14 @@ class LortnocMonitor:
   @ui.refreshable
   def render_client_header (self, _client) -> None:
     status = _client.get("status", "offline")
+    client_ver = _client.get("version", "unknown")
+
+    # Check update status
+    is_outdated = False
+    if self.latest_version and self.latest_version != "Unknown" and client_ver != "unknown":
+      # basic string compare (assumes vX.Y.Z)
+      if self.latest_version.lstrip('v') != client_ver.lstrip('v'):
+        is_outdated = True
 
     with ui.row().classes('w-full items-center justify-between pb-4 border-b border-slate-700'):
       with ui.row().classes('items-center gap-4 flex-grow'):
@@ -616,12 +691,71 @@ class LortnocMonitor:
               with ui.row().classes('gap-3'):
                 self._action_btn('replay', 'warning', 'Reboot', lambda: self._confirm_and_send(_client, 'reboot'))
                 self._action_btn('power_off', 'negative', 'Shutdown', lambda: self._confirm_and_send(_client, 'shutdown'))
-                self._action_btn('cloud_download', 'info', 'Update', lambda: self._confirm_and_send(_client, 'update'))
+
+                # Update Button Logic
+                if is_outdated:
+                   with ui.button(icon='system_update', on_click=lambda: self._confirm_and_send(_client, 'update')) \
+                        .props('flat dense color=green').classes('text-green-400 border border-green-500'):
+                     ui.tooltip(f'Update to {self.latest_version}')
+                     ui.label('UPDATE AVAILABLE').classes('ml-2 font-bold')
+
+            else:
+              # Only allow delete if offline
+              self._action_btn('delete', 'negative', 'Delete Client', lambda: self._confirm_delete(_client))
 
           with ui.row().classes('items-center gap-2'):
             status_class = 'bg-green-500' if status == 'online' else 'bg-red-500'
             ui.element('div').classes(f'w-2 h-2 rounded-full {status_class}')
-            ui.label(f"{status.upper()} • {_client.get('ip', 'N/A')}").classes('text-sm text-slate-400')
+
+            # Version Badge
+            version_color = 'text-green-400' if not is_outdated and client_ver != 'unknown' else 'text-slate-500'
+            if is_outdated:
+              version_color = 'text-amber-500'
+
+            ui.label(f"v{client_ver}").classes(f'text-xs font-mono {version_color} font-bold mr-2')
+
+            ui.separator().props('vertical').classes('h-4 border-slate-700')
+
+            seen_time = _client.get('last_seen')
+            if isinstance(seen_time, str):
+               # Try parse if loaded from JSON
+               try: seen_time = datetime.fromisoformat(seen_time)
+               except: pass
+
+            seen_str = "Never"
+            if isinstance(seen_time, datetime):
+                diff = (datetime.now() - seen_time).total_seconds()
+                if diff < 60:
+                    seen_str = "Just now"
+                elif diff < 3600:
+                    seen_str = f"{int(diff // 60)} min ago"
+                elif diff < 86400:
+                    seen_str = f"{int(diff // 3600)} h ago"
+                else:
+                    seen_str = f"{int(diff // 86400)} days ago"
+
+            ui.label(f"{status.upper()} • {_client.get('ip', 'N/A')} • {seen_str}").classes('text-sm text-slate-400')
+
+  # ----------------------------------------------------------------------------------------------------------------------
+  def _confirm_delete (self, _client) -> None:
+    with ui.dialog() as dialog:
+      with ui.card().classes('bg-slate-800 text-white border border-slate-600'):
+        ui.label(f"Delete '{_client['name']}'?").classes('text-lg font-bold text-red-500')
+        ui.label(f"This will remove the client from the list.").classes('text-slate-300')
+        ui.label(f"It will reappear automatically if it sends a heartbeat.").classes('text-xs text-slate-500 italic mt-1')
+
+        with ui.row().classes('w-full justify-end mt-4'):
+          ui.button('Cancel', on_click=dialog.close).props('flat text-color=white')
+          ui.button('DELETE', color='negative',
+                    on_click=lambda: [self._delete_client(_client['id']), dialog.close()])
+    dialog.open()
+
+  # ----------------------------------------------------------------------------------------------------------------------
+  def _delete_client (self, _client_id: str) -> None:
+    self.clients = [c for c in self.clients if c['id'] != _client_id]
+    self._save_persisted_clients()
+    self.show_dashboard()
+    ui.notify(f'Client {_client_id} removed', type='positive')
 
   # ----------------------------------------------------------------------------------------------------------------------
   def _confirm_and_send (self, _client, _action) -> None:
@@ -770,15 +904,71 @@ class LortnocMonitor:
     self.render_client_terminal.refresh()  # type: ignore
 
 
+  # ----------------------------------------------------------------------------------------------------------------------
+  async def check_for_updates(self) -> None:
+    """
+    Checks for updates by comparing local version with GitHub latest release.
+    """
+    try:
+      # 1. Determine Local Version
+      # In Docker, we expect /app/version.txt (mounted or copied)
+      version_path = '/app/version.txt'
+      if not os.path.exists(version_path):
+        # Fallback for local testing if file exists in project root (assuming structure)
+        # sources/main.py -> sources/ -> lortnoc_monitor/ -> repo root
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        potential_path = os.path.join(current_dir, '../../version.txt')
+        if os.path.exists(potential_path):
+          version_path = potential_path
+
+      if os.path.exists(version_path):
+        with open(version_path, 'r', encoding='utf-8') as f:
+          self.current_version = f.read().strip()
+      else:
+        self.logger.warning(f"Version file not found at {version_path}. Assuming dev/unknown version.")
+
+      self.logger.info(f"Local Version: {self.current_version}")
+
+      # 2. Fetch Latest from GitHub
+      url = "https://api.github.com/repos/lortnoc/lortnoc/releases/latest"
+      async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=10) as response:
+          if response.status == 200:
+            data = await response.json()
+            self.latest_version = data.get("tag_name", "Unknown")
+
+            # 3. Compare
+            if self.current_version != "Unknown" and self.latest_version != "Unknown":
+              # Remove 'v' prefix for comparison
+              curr = self.current_version.lstrip('v')
+              lat = self.latest_version.lstrip('v')
+
+              if curr != lat:
+                self.update_available = True
+                self.logger.info(f"New version available: {self.latest_version}")
+                ui.notify(f"Update Available: {self.latest_version}", type='info', close_button=True, timeout=0)
+
+              # Refresh UI button
+              self.render_system_update_btn.refresh()
+          else:
+            self.logger.warning(f"Failed to fetch updates from GitHub: {response.status}")
+
+    except Exception as e:
+      self.logger.error(f"Error checking for updates: {e}")
+
+
   # A P P   L I F E C Y C L E --------------------------------------------------------------------------------------------
   def run (self) -> None:
     # Add Auth Middleware
     app.add_middleware(AuthMiddleware, monitor_app=self)
 
+
     # Startup hooks
     app.on_startup(self.transport.connect)
     # Ping all known clients on startup to check availability
     app.on_startup(self.ping_all_clients)
+    # Check for updates in background
+    app.on_startup(self.check_for_updates)
     app.on_shutdown(self.transport.disconnect)
 
     # UI
@@ -787,7 +977,18 @@ class LortnocMonitor:
     try:
       self.logger.info("Starting Lortnoc Monitor UI...")
       current_dir = os.path.dirname(os.path.abspath(__file__))
-      favicon_path = os.path.abspath(os.path.join(current_dir, '../resources/lortnoc.png'))
+      # Resources are at root/resources relative to lortnoc_monitor/sources/
+      # In Repo: lortnoc/lortnoc_monitor/sources -> ../../resources
+      # In Docker: /app/lortnoc_monitor/sources -> ../../resources
+      favicon_path = os.path.abspath(os.path.join(current_dir, '../../resources/lortnoc.png'))
+
+      # Serve Apple Icons to prevent 404 logs
+      @app.get('/apple-touch-icon.png')
+      @app.get('/apple-touch-icon-precomposed.png')
+      def apple_icon():
+          if os.path.exists(favicon_path):
+              return FileResponse(favicon_path)
+          return RedirectResponse('/favicon.ico')
 
       ui.run(host='0.0.0.0', port=8080, title='Lortnoc Monitor', dark=True, reload=False, favicon=favicon_path)
     except Exception as e:
