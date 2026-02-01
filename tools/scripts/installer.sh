@@ -151,57 +151,69 @@ if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
 if [ -c /dev/tty ]; then
     echo -e "${YELLOW}[*] Starting Interactive Configuration...${NC}"
 
-    # Install cryptography if missing for key generation
-    pip3 install cryptography --quiet &>/dev/null || true
-
     python3 -c "
-import json, os, sys
-try:
-  from cryptography.fernet import Fernet
-except ImportError:
-  Fernet = None
+import json, os, sys, base64, getpass
 
 target = '$INSTALL_DIR/config/$CONFIG_FILE'
+
+def prompt(label, hidden=False):
+  try:
+    if hidden:
+      val = getpass.getpass(f'{label}: ')
+    else:
+      val = input(f'{label}: ')
+    return val.strip()
+  except EOFError:
+    return ''
 
 if os.path.exists(target):
   with open(target, 'r') as f: config = json.load(f)
 
   # --- Prompting for Core Details ---
   if '$COMPONENT' == 'monitor':
-    config['discord']['token'] = input('Discord Token: ')
-    config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
-    config['admin_password'] = input('Admin Password: ')
-    config['admin_discord_id'] = input('Admin User ID (for OTP/DM): ')
+    p = prompt('Lortnoc Admin Password', hidden=True)
+    if p: config['admin_password'] = p
+
+    t = prompt('Discord Token', hidden=True)
+    if t: config['discord']['token'] = t
+
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)')
+    if c: config['discord']['heartbeat_channel_id'] = c
+
+    a = prompt('Discord Admin User ID (for OTP/DM)')
+    if a: config['admin_discord_id'] = a
+
   else:
-    config['client_name'] = input('Client Name: ')
-    config['discord']['token'] = input('Discord Token: ')
-    config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
+    n = prompt('Lortnoc client name')
+    if n: config['client_name'] = n
+
+    t = prompt('Discord Token', hidden=True)
+    if t: config['discord']['token'] = t
+
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)')
+    if c: config['discord']['heartbeat_channel_id'] = c
 
   # --- Key Generation / Check ---
   current_key = config.get('encryption_key', '')
 
-  if current_key:
-     print(f'[i] Encryption Key detected: {current_key[:10]}...')
+  if current_key and len(current_key) > 5:
+    print(f'[i] Encryption Key detected: {current_key[:5]}...*****')
   else:
     if '$COMPONENT' == 'monitor':
-       if Fernet:
-         print('[*] Generating New Encryption Key...')
-         key = Fernet.generate_key().decode()
-         config['encryption_key'] = key
-         print(f'[+] New Key Generated: {key}')
-         print('    !! COPY THIS KEY TO ALL CLIENTS !!')
-       else:
-         print('[!] Warning: cryptography module missing. Cannot generate key automatically.')
-         print('    Run: pip install cryptography')
+      print('[*] Generating New Encryption Key...')
+      key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+      config['encryption_key'] = key
+      print(f'[+] New Key Generated: {key}')
+      print('    !! COPY THIS KEY TO ALL CLIENTS !!')
     else:
-       # For Client, we must ask for the key
-       print('')
-       print('[*] Security Setup (Encryption)')
-       new_key = input('Encryption Key (Copy from Monitor): ').strip()
-       if new_key:
-         config['encryption_key'] = new_key
-       else:
-         print('[!] Warning: No encryption key provided. Client will not be able to communicate.')
+      # For Client, we must ask for the key
+      print('')
+      print('[*] Security Setup (Encryption)')
+      new_key = prompt('Encryption Key (Copy from Monitor)', hidden=True)
+      if new_key:
+        config['encryption_key'] = new_key
+      else:
+        print('[!] Warning: No encryption key provided. Client will not be able to communicate.')
 
   with open(target, 'w') as f: json.dump(config, f, indent=2)
   print('[+] Config updated.')
