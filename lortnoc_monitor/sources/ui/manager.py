@@ -45,6 +45,10 @@ class UIManager:
     self.selected_client_id = None
     self.main_container = None
 
+    # History for each client
+    self.cmd_history = {} # client_id -> list of commands
+    self.cmd_history_idx = {} # client_id -> int
+
   # --------------------------------------------------------------------------------------------------------------------
   def setup_ui (self):
     @ui.page('/login')
@@ -140,6 +144,27 @@ class UIManager:
     ui.add_head_html('''
       <style>
         body { background-color: #0f172a; }
+
+        /* Global Selection Enforcer */
+        .nicegui-content, .nicegui-content * {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            -ms-user-select: text !important;
+        }
+
+        /* Specific class for heavy enforcement */
+        .selectable-text, .selectable-text * {
+            user-select: text !important;
+            -webkit-user-select: text !important;
+        }
+
+        /* Restore pointer for interactive elements */
+        button, .q-btn, .cursor-pointer, .cursor-pointer * {
+           cursor: pointer;
+        }
+
+        /* Terminal Input Styling */
         .cmd-input .q-field__native {
             color: #4ade80 !important;
             caret-color: #4ade80 !important;
@@ -243,11 +268,19 @@ class UIManager:
     with ui.column().classes('gap-2 w-full'):
       for log in self.monitor.logs:
         ts_str = log['ts'].strftime('%H:%M:%S')
-        content = log.get('log_msg', log['text'])
-        if len(content) > 100:
-          content = content[:100] + "..."
+
+        # Only show content for SYSTEM, mask client details for security
+        if log['client_id'] == "SYSTEM":
+          content = log.get('log_msg', log['text'])
+          display_str = f"SYSTEM: {content}"
+        else:
+          # Try to resolve client name from ID
+          client_ref = self.monitor.client_manager.get_client(log['client_id'])
+          client_name = client_ref.get('name', 'Unknown') if client_ref else log['client_id']
+          display_str = f"{client_name}"
+
         with ui.row().classes('w-full items-start gap-2 text-[11px] font-mono text-slate-400 border-l-2 border-slate-800 pl-2 py-1'):
-          ui.label(f"[{ts_str}] {log['client_id']}: {content}").classes('break-all leading-tight')
+          ui.label(f"[{ts_str}] {display_str}").classes('break-all leading-tight')
 
   # --------------------------------------------------------------------------------------------------------------------
   @ui.refreshable
@@ -326,18 +359,18 @@ class UIManager:
       ui.label("Client introuvable").classes('text-red-500')
       return
 
-    with ui.column().classes('w-full h-full max-w-5xl mx-auto flex flex-col overflow-hidden no-wrap gap-4 p-6'):
+    with ui.column().classes('w-full h-full max-w-5xl mx-auto flex flex-col overflow-hidden no-wrap gap-4 p-6 selectable-text'):
       self.render_client_header(client)
 
       if client.get("status") == 'online':
         self.render_client_stats(client)
 
-        term_classes = f"{self.THEME['terminal']} w-full flex-1 flex flex-col min-h-0 overflow-hidden p-0"
+        term_classes = f"{self.THEME['terminal']} w-full flex-1 flex flex-col min-h-0 overflow-hidden p-0 selectable-text"
         with ui.card().classes(term_classes):
           with ui.row().classes('w-full bg-[#2d2d2d] px-4 py-1 items-center gap-2 border-b border-black flex-none'):
             ui.label(f"ssh root@{client.get('ip','remote')}").classes('ml-2 text-xs text-slate-400')
 
-          with ui.column().classes('p-4 w-full gap-1 flex-1 overflow-y-auto bg-[#1e1e1e] terminal-scroll-container'):
+          with ui.column().classes('p-4 w-full gap-1 flex-1 overflow-y-auto bg-[#1e1e1e] terminal-scroll-container selectable-text'):
             self.render_client_terminal()
 
           with ui.row().classes('w-full bg-[#1e1e1e] pl-4 pr-2 py-2 items-center border-t border-slate-700 flex-none relative z-10'):
@@ -347,9 +380,12 @@ class UIManager:
             ).classes(
               'flex-grow text-green-400 font-mono tracking-wider cmd-input'
             ).on('keydown.enter', lambda e: self._on_cmd_enter(e, client['id']))
-            cmd_input.on('blur', lambda: cmd_input.run_method('focus'))
+
+            # History binding
+            cmd_input.on('keydown.up', lambda e: self._on_cmd_history(e, cmd_input, client['id'], -1))
+            cmd_input.on('keydown.down', lambda e: self._on_cmd_history(e, cmd_input, client['id'], 1))
       else:
-        with ui.column().classes('w-full items-center justify-center flex-1 opacity-50'):
+        with ui.column().classes('w-full items-center justify-center flex-1 opacity-50 selectable-text'):
           ui.icon('cloud_off', size='160px', color='slate-700')
           ui.label('Device Offline').classes('text-5xl font-bold text-slate-500 mt-8 mb-2')
 
@@ -490,7 +526,7 @@ class UIManager:
         ui.label("No logs available...").classes("text-slate-500 italic")
         return
 
-      for log in reversed(relevant_logs):
+      for log in relevant_logs:
         ts_str = log['ts'].strftime('%H:%M:%S')
         raw_text = str(log.get('text', ''))
         lid = log.get('id')
@@ -538,6 +574,45 @@ class UIManager:
     if val:
       self.monitor.send_command(client_id, "exec", [val])
       e.sender.value = ""
+
+      # Add to history
+      if client_id not in self.cmd_history:
+        self.cmd_history[client_id] = []
+
+      # Avoid duplicate consecutive entries
+      if not self.cmd_history[client_id] or self.cmd_history[client_id][-1] != val:
+        self.cmd_history[client_id].append(val)
+
+      # Reset index
+      self.cmd_history_idx[client_id] = len(self.cmd_history[client_id])
+
+  # --------------------------------------------------------------------------------------------------------------------
+  def _on_cmd_history (self, e, input_el, client_id, direction):
+    """
+    Handles Up/Down arrow for command history.
+    direction: -1 (up/back), 1 (down/forward)
+    """
+    hist = self.cmd_history.get(client_id, [])
+    if not hist:
+      return
+
+    idx = self.cmd_history_idx.get(client_id, len(hist))
+
+    # Calculate new index
+    new_idx = idx + direction
+
+    # Boundary checks
+    if new_idx < 0:
+      new_idx = 0
+    elif new_idx > len(hist):
+      new_idx = len(hist)
+
+    self.cmd_history_idx[client_id] = new_idx
+
+    if 0 <= new_idx < len(hist):
+      input_el.value = hist[new_idx]
+    else:
+      input_el.value = "" # Clear if moving past last item (new command)
 
   # Refresh helpers
   def refresh_sidebar(self):

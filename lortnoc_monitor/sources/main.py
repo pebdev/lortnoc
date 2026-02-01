@@ -157,8 +157,34 @@ class LortnocMonitor:
     self.transport.on_message = self.on_transport_message
 
     await self.transport.connect()
-    self.logger.info("Discord Transport started.")
+    
+    # Wait for connection to be ready (up to 10s)
+    for _ in range(20):
+      if getattr(self.transport, '_connected', False):
+        break
+      await asyncio.sleep(0.5)
+
+    if not getattr(self.transport, '_connected', False):
+      self.logger.warning("Discord Transport failed to connect within timeout. Startup pings may fail.")
+    else:
+      self.logger.info("Discord Transport connected and ready.")
+
     self.add_log("Monitor Started", "SYSTEM")
+
+    # Wake up known clients
+    count = 0
+    for client in self.client_manager.get_all_clients():
+      cmd_channel = client.get("command_channel_id")
+      if cmd_channel:
+        try:
+          self.transport.add_listening_channel(int(cmd_channel))
+          self.send_command(client["id"], "ping")
+          count += 1
+        except Exception as e:
+          self.logger.warning(f"Failed to wake client {client['id']}: {e}")
+
+    if count > 0:
+      self.add_log(f"Ping sent to {count} devices", "SYSTEM")
 
   # --------------------------------------------------------------------------------------------------------------------
   async def shutdown (self) -> None:
@@ -184,7 +210,7 @@ class LortnocMonitor:
     elif msg_type == "output":
       self.handle_output(_message)
     elif msg_type == "log":
-      self.add_log(f"Remote Log: {_message.get('data')}", client_id)
+      self.add_log(f"Remote Log: {_message.get('data') or _message.get('message')}", client_id)
 
   # --------------------------------------------------------------------------------------------------------------------
   def handle_heartbeat (self, _message: Dict) -> None:
@@ -195,17 +221,26 @@ class LortnocMonitor:
       "id": _message.get("client_id"),
       "name": data.get("hostname", "Unknown"),
       "ip": data.get("ip", "Unknown"),
-      "cpu": data.get("cpu_usage", 0),
-      "ram": data.get("ram_usage", 0),
-      "disk": data.get("disk_usage", 0),
-      "temp": data.get("cpu_temp", 0),
+      "cpu": data.get("cpu", 0),
+      "ram": data.get("ram", 0),
+      "disk": data.get("disk", 0),
+      "temp": data.get("temp", 0),
       "net_sent": data.get("net_sent", 0),
       "net_recv": data.get("net_recv", 0),
       "version": data.get("version", "unknown"),
+      "command_channel_id": data.get("command_channel_id"),
       "status": "online"
     }
 
     self.client_manager.update_client(client_payload)
+
+    # Dynamic Channel Registration
+    cmd_channel = data.get("command_channel_id")
+    if cmd_channel and self.transport:
+      try:
+        self.transport.add_listening_channel(int(cmd_channel))
+      except Exception:
+        pass
 
     # Update Global version info if present
     if "latest_version" in data:
@@ -232,11 +267,22 @@ class LortnocMonitor:
       ui.notify("Transport not connected", type="negative")
       return
 
+    # Resolve target channel from client manager
+    client = self.client_manager.get_client(_client_id)
+    target_channel = None
+    if client:
+      target_channel = client.get("command_channel_id")
+
+    if not target_channel:
+      ui.notify(f"Cannot send command: Unknown route to client {_client_id}", type="negative")
+      return
+
     payload = {
       "type": "command",
       "target_id": _client_id,
-      "command": _cmd,
-      "args": _args or []
+      "action": _cmd,
+      "args": _args or [],
+      "_target_channel_id": int(target_channel)
     }
 
     # We don't await here to not block UI, fire and forget or create task

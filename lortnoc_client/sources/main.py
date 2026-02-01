@@ -224,7 +224,7 @@ class LortnocClient:
     is_error  = False
     action    = _msg.get('action')
     args      = _msg.get('args', [])
-    self.logger.info(f"Received command: {action} {args}")
+    self.logger.info(f"Received command '{action}' from Monitor (Content Hidden)")
 
     try:
       if action == 'reboot':
@@ -259,14 +259,14 @@ class LortnocClient:
       result = str(e)
       is_error = True
 
-    # Send Feedback Log
+    # Send Feedback Output
     origin_channel = _msg.get('_origin_channel_id')
     await self.transport.send({
-      "type": "log",
+      "type": "output",
       "client_id": self.client_id,
       "timestamp": time.time(),
       "level": "ERROR" if is_error else "INFO",
-      "message": f"CMD '{action}': {result}",
+      "data": result,
       "_target_channel_id": origin_channel
     })
 
