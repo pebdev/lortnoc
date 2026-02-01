@@ -1,3 +1,5 @@
 nicegui
 discord.py
 aiohttp
+cryptography
+pyotp

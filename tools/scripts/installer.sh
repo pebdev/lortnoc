@@ -148,24 +148,82 @@ if [ ! -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
     echo -e "${RED}[!] Template file missing. Configuration initialization failed.${NC}"
   fi
 
-  # Only attempt interactive setup if we have a TTY (terminal) or direct access to /dev/tty
-  if [ -c /dev/tty ]; then
+if [ -c /dev/tty ]; then
     echo -e "${YELLOW}[*] Starting Interactive Configuration...${NC}"
+
     python3 -c "
-import json, os
+import json, os, sys, base64, getpass
+
 target = '$INSTALL_DIR/config/$CONFIG_FILE'
+
+def prompt(label, hidden=False):
+  try:
+    if hidden:
+      val = getpass.getpass(f'{label}: ')
+    else:
+      val = input(f'{label}: ')
+    return val.strip()
+  except EOFError:
+    return ''
 
 if os.path.exists(target):
   with open(target, 'r') as f: config = json.load(f)
 
+  # --- Prompting for Core Details ---
   if '$COMPONENT' == 'monitor':
-    config['discord']['token'] = input('Discord Token: ')
-    config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
-    config['admin_password'] = input('Admin Password: ')
+    p = prompt('Lortnoc Admin Password', hidden=True)
+    if p: config['admin_password'] = p
+
+    t = prompt('Discord Token', hidden=True)
+    if t: config['discord']['token'] = t
+
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)', hidden=True)
+    if c: config['discord']['heartbeat_channel_id'] = c
+
+    # --- TOTP Generation ---
+    if 'totp_secret' not in config or not config['totp_secret']:
+      import base64, os
+      # Generate 32-char Base32 secret for TOTP (Google Authenticator compatible)
+      # 20 bytes entropy -> base32 encoded -> string
+      secret = base64.b32encode(os.urandom(20)).decode('utf-8')
+      config['totp_secret'] = secret
+      print('')
+      print(f'[+] Lortnoc TOTP Secret Generated: {secret}')
+      print('    !! ADD THIS KEY TO YOUR AUTHENTICATOR APP !!')
+
   else:
-    config['client_name'] = input('Client Name: ')
-    config['discord']['token'] = input('Discord Token: ')
-    config['discord']['heartbeat_channel_id'] = input('Channel ID: ')
+    n = prompt('Lortnoc client name')
+    if n: config['client_name'] = n
+
+    t = prompt('Discord Token', hidden=True)
+    if t: config['discord']['token'] = t
+
+    c = prompt('Discord heartbeat Channel ID (Heartbeat)', hidden=True)
+    if c: config['discord']['heartbeat_channel_id'] = c
+
+  # --- Key Generation / Check ---
+  current_key = config.get('discord', {}).get('encryption_key', '')
+
+  if current_key and len(current_key) > 5:
+    print(f'[i] Encryption Key detected: {current_key[:5]}...*****')
+  else:
+    if 'discord' not in config: config['discord'] = {}
+
+    if '$COMPONENT' == 'monitor':
+      print('[*] Generating New Encryption Key...')
+      key = base64.urlsafe_b64encode(os.urandom(32)).decode()
+      config['discord']['encryption_key'] = key
+      print(f'[+] New Key Generated: {key}')
+      print('    !! COPY THIS KEY TO ALL CLIENTS !!')
+    else:
+      # For Client, we must ask for the key
+      print('')
+      print('[*] Security Setup (Encryption)')
+      new_key = prompt('Encryption Key (Copy from Monitor)', hidden=True)
+      if new_key:
+        config['discord']['encryption_key'] = new_key
+      else:
+        print('[!] Warning: No encryption key provided. Client will not be able to communicate.')
 
   with open(target, 'w') as f: json.dump(config, f, indent=2)
   print('[+] Config updated.')
@@ -179,6 +237,30 @@ if os.path.exists(target):
   fi
 fi
 
+# Client ID Generation (Client Only)
+if [ "$COMPONENT" == "client" ]; then
+  CONF_PATH="$INSTALL_DIR/config/$CONFIG_FILE"
+  if [ -f "$CONF_PATH" ]; then
+    # Check if client_id is set or empty
+    CURRENT_ID=$(grep '"client_id"' "$CONF_PATH" | head -1 | cut -d':' -f2 | tr -d '", ')
+
+    if [ -z "$CURRENT_ID" ]; then
+      echo -e "${YELLOW}[*] Generating unique system Client ID...${NC}"
+      # Generates a random ID (Timestamp + Random)
+      NEW_ID="$(date +%s)-$RANDOM"
+
+      # Use temp file for sed to handle both Linux and macOS
+      sed "s/\"client_id\"[[:space:]]*:[[:space:]]*\"\"/\"client_id\" : \"$NEW_ID\"/" "$CONF_PATH" > "$CONF_PATH.tmp" && mv "$CONF_PATH.tmp" "$CONF_PATH"
+      echo -e "    Assigned ID: $NEW_ID"
+    fi
+  fi
+fi
+
+# Secure the config file
+if [ -f "$INSTALL_DIR/config/$CONFIG_FILE" ]; then
+  chmod 600 "$INSTALL_DIR/config/$CONFIG_FILE"
+  echo -e "${GREEN}[*] Config file permissions secured.${NC}"
+fi
 
 # Save Version immediately after install so it's available for Docker build
 echo "$LATEST_VERSION" > "$INSTALL_DIR/VERSION"
@@ -304,7 +386,7 @@ else
 
   echo -e ""
   echo -e "${YELLOW}  [i] TO START THE CLIENT:${NC}"
-  echo -e "      $INSTALL_DIR/tools/scripts/run.sh &"
+  echo -e "      $INSTALL_DIR/tools/scripts/run.sh client &"
   echo -e ""
 
   # Check if systemd setup occurred

@@ -15,12 +15,12 @@ COPY lortnoc_client/ /app/lortnoc_client/
 COPY resources/ /app/resources/
 
 # Create data/log dir if needed
-RUN mkdir -p /app/data
+RUN mkdir -p /app/.data
 
 # Copy unified tools
 COPY tools/scripts/ /app/tools/scripts/
 RUN chmod +x /app/tools/scripts/*.sh
-#COPY VERSION /app/VERSION
+COPY VERSION /app/VERSION
 
 # Set PYTHONPATH explicitly to /app to make imports generic
 ENV PYTHONPATH="/app"

@@ -1,12 +1,16 @@
 {
-  "admin_password"      : "",
-  "otp_enabled"         : false,
+  "admin_password"          : "",
+  "totp_secret"             : "",
 
-  "client_name"         : "Lortnoc-Device",
-  "heartbeat_interval"  : 300,
-  "log_file"            : "/tmp/lortnoc.log",
+  "client_id"               : "",
+  "client_name"             : "",
+
+  "heartbeat_interval"      : 300,
+  "log_file"                : "/tmp/lortnoc.log",
+
   "discord": {
     "token"                 : "",
-    "heartbeat_channel_id"  : ""
+    "heartbeat_channel_id"  : "",
+    "encryption_key"        : ""
   }
 }
