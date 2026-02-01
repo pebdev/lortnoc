@@ -196,10 +196,10 @@ class LortnocClient:
       payload = {
         "type": "heartbeat",
         "client_id": self.client_id,
-        "client_name": self.client_id,
         "timestamp": time.time(),
         "_target_channel_id": self.heartbeat_channel_id or None,
-        "payload": {
+        "data": {
+          "hostname": self.client_name,
           "status": "online",
           "version": self.version,
           "os": self.os_info,

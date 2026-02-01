@@ -167,7 +167,7 @@ class UIManager:
           lbl = ui.label().classes('text-xs text-slate-600 font-mono')
           lbl.bind_text_from(
             self.monitor, 'current_version',
-            backward=lambda v: f"v{v}" if v and v.lower() != "unknown" else "Dev"
+            backward=lambda v: f"{v}" if v and v.lower() != "unknown" else "vDEV"
           )
           self.render_system_update_btn()
 
