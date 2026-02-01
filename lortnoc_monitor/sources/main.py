@@ -49,18 +49,22 @@ class LortnocMonitor:
 
   # --------------------------------------------------------------------------------------------------------------------
   def __init__ (self):
-    self.logger = logging.getLogger("LortnocMonitor")
-
     # 1. Config Loading & Validation
     # ------------------------------
     self.config = load_config()
+
+    # 2. Logging Setup
+    # ----------------
+    setup_logging(self.config.get("log_file"))
+    self.logger = logging.getLogger("LortnocMonitor")
+
     discord_cfg = self.config.get("discord", {})
 
     self.discord_token      = discord_cfg.get("token")
     self.discord_channel_id = discord_cfg.get("heartbeat_channel_id")
     self.encryption_key     = discord_cfg.get("encryption_key")
+    self.admin_discord_id   = discord_cfg.get("admin_discord_id")
     self.admin_password     = self.config.get("admin_password")
-    self.admin_discord_id   = self.config.get("admin_discord_id")
 
     # Critical Config Check
     if not self.discord_token:
@@ -290,7 +294,6 @@ def setup_app_components (_app: FastAPI, _monitor: LortnocMonitor) -> None:
 
 # M A I N ##############################################################################################################
 if __name__ in {"__main__", "__mp_main__"}:
-  setup_logging()
   _monitor_instance = LortnocMonitor()
 
   # Create FastAPI app with lifespan

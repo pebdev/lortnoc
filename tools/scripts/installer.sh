@@ -181,7 +181,7 @@ if os.path.exists(target):
     if c: config['discord']['heartbeat_channel_id'] = c
 
     a = prompt('Discord Admin User ID (for OTP/DM)', hidden=True)
-    if a: config['admin_discord_id'] = a
+    if a: config['discord']['admin_discord_id'] = a
 
   else:
     n = prompt('Lortnoc client name')
@@ -200,7 +200,7 @@ if os.path.exists(target):
     print(f'[i] Encryption Key detected: {current_key[:5]}...*****')
   else:
     if 'discord' not in config: config['discord'] = {}
-    
+
     if '$COMPONENT' == 'monitor':
       print('[*] Generating New Encryption Key...')
       key = base64.urlsafe_b64encode(os.urandom(32)).decode()
@@ -378,7 +378,7 @@ else
 
   echo -e ""
   echo -e "${YELLOW}  [i] TO START THE CLIENT:${NC}"
-  echo -e "      $INSTALL_DIR/tools/scripts/run.sh &"
+  echo -e "      $INSTALL_DIR/tools/scripts/run.sh client &"
   echo -e ""
 
   # Check if systemd setup occurred

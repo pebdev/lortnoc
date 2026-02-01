@@ -48,7 +48,6 @@ class DiscordTransport(Transport):
 
     try:
       self.cipher_suite = Fernet(_encryption_key.encode())
-      logger.info("End-to-End Encryption ENABLED.")
     except Exception as e:
       logger.critical(f"Invalid Encryption Key: {e}")
       raise ValueError(f"Invalid Encryption Key provided: {e}") from e

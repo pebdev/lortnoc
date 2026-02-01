@@ -92,8 +92,6 @@ class LortnocClient:
     # 4. Initialization
     # -----------------
     self.client_name = self.config.get("client_name", "Unknown-Device")
-    self.logger.info(f"Identity: {self.client_name} ({self.client_id})")
-
     self.os_info = f"{platform.system()} {platform.release()}"
     self.cmd_channel_id = None
 
@@ -116,7 +114,7 @@ class LortnocClient:
     except Exception:
       pass
 
-    self.logger.info(f"Initialized Lortnoc Client ({self.client_id}) v{self.version}")
+    self.logger.info(f"Initialized Lortnoc Client {self.client_name} ({self.client_id}) {self.version}")
 
 
   # L I F E C Y C L E --------------------------------------------------------------------------------------------------

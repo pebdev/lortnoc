@@ -1,6 +1,5 @@
 {
   "admin_password"          : "",
-  "admin_discord_id"        : "",
 
   "client_id"               : "",
   "client_name"             : "",
@@ -9,6 +8,7 @@
   "log_file"                : "/tmp/lortnoc.log",
 
   "discord": {
+    "admin_discord_id"      : "",
     "token"                 : "",
     "heartbeat_channel_id"  : "",
     "encryption_key"        : ""
