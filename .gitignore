@@ -1,5 +1,6 @@
 __pycache__/
 .data
 
+.DS_Store
 config/config.json*
 VERSION

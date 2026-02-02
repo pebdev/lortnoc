@@ -129,23 +129,26 @@ class UIManager:
       <style>
         body { background-color: #0f172a; }
 
-        /* Global Selection Enforcer */
+        /* Global Selection Enforcer
+           NOTE: We exclude interactive elements (buttons, cursor-pointer) to fix touch events on iOS/Mobile.
+           Forcing user-select: text on buttons makes the browser interpret taps as text selection attempts.
+        */
         .nicegui-content, .nicegui-content * {
-            user-select: text !important;
-            -webkit-user-select: text !important;
-            -moz-user-select: text !important;
-            -ms-user-select: text !important;
+            user-select: text;
+            -webkit-user-select: text;
         }
 
-        /* Specific class for heavy enforcement */
+        /* Re-disable selection on interactive elements to ensure click events fire correctly */
+        button, .q-btn, .cursor-pointer, .cursor-pointer * {
+           cursor: pointer;
+           user-select: none !important;
+           -webkit-user-select: none !important;
+        }
+
+        /* Specific class for heavy enforcement if really needed */
         .selectable-text, .selectable-text * {
             user-select: text !important;
             -webkit-user-select: text !important;
-        }
-
-        /* Restore pointer for interactive elements */
-        button, .q-btn, .cursor-pointer, .cursor-pointer * {
-           cursor: pointer;
         }
 
         /* Terminal Input Styling */

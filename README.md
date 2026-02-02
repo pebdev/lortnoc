@@ -96,6 +96,15 @@ Run the following command on each device:
 curl -sL https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/scripts/installer.sh | bash -s -- client /opt/lortnoc_client
 ```
 
+**Options**:
+You can add arguments to control the installation (useful for automated deployments):
+```bash
+# Non-interactive installation without systemd service
+curl -sL ... | bash -s -- client /opt/lortnoc_client --install --no-service
+```
+- `[mode]`: `--install` (default) or `--update-runtime`
+- `[service-option]`: `--with-service` (force create systemd service) or `--no-service` (skip systemd service)
+
 This will:
 1. Download the latest version.
 2. Create a virtual environment (`.venv`).
@@ -117,15 +126,13 @@ Add the following to your `Dockerfile`:
 RUN apt-get update && apt-get install -y curl python3 python3-venv sudo tzdata
 
 # 2. Install Lortnoc Client
-RUN curl -sL https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/scripts/installer.sh | bash -s -- client /opt/lortnoc_client --install
+RUN mkdir -p /opt/lortnoc/config
+COPY data/lortnoc/config.json /opt/lortnoc/config/config.json
+RUN curl -sL https://raw.githubusercontent.com/pebdev/lortnoc/master/tools/scripts/installer.sh | bash -s -- client /opt/lortnoc --install --no-service
 
-# 3. Configure
-# You should mount the real config.json at runtime via a volume
-COPY config.json /opt/lortnoc_client/config/config.json
-
-# 4. Start (Background)
-# Use a Supervisor or an entrypoint script to run your app AND lortnoc
-# ENTROPOINT ["/opt/lortnoc_client/tools/scripts/run.sh", "client", "&"]
+# 3. Start (Background)
+# In your entrypoint script, add:
+/opt/lortnoc/tools/scripts/run.sh client &
 ```
 
 ## ⚙️ Configuration Reference
