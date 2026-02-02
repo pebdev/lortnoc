@@ -27,10 +27,18 @@ NC='\033[0m'
 COMPONENT="$1"
 TARGET_DIR="$2"
 MODE="$3"
+SERVICE_OPT="$4"
+
+# Handle arguments shift if MODE is omitted or is a service flag
+if [[ "$MODE" == "--no-service" || "$MODE" == "--with-service" ]]; then
+  SERVICE_OPT="$MODE"
+  MODE="--install"
+fi
 
 if [[ -z "$COMPONENT" || ("$COMPONENT" != "client" && "$COMPONENT" != "monitor") ]]; then
-  echo -e "${RED}Usage: $0 <client|monitor> <install_directory> [mode]${NC}"
+  echo -e "${RED}Usage: $0 <client|monitor> <install_directory> [mode] [service-option]${NC}"
   echo -e "${RED}Modes: --install (default), --update-runtime${NC}"
+  echo -e "${RED}Service Options: --with-service, --no-service${NC}"
   exit 1
 fi
 
@@ -300,11 +308,19 @@ else
 fi
 
 # --- Systemd Service Proposal (Client Only) ---------------------------------------------------------------------------
-if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "client" ] && [ -c /dev/tty ]; then
-  echo -e ""
-  echo -e "${YELLOW}[?] Do you want to create a Systemd Service for auto-start? [y/N] ${NC}"
-  read -r -n 1 response < /dev/tty
-  echo ""
+if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "client" ]; then
+  response="n"
+
+  if [ "$SERVICE_OPT" == "--with-service" ]; then
+    response="y"
+  elif [ "$SERVICE_OPT" == "--no-service" ]; then
+    response="n"
+  elif [ -c /dev/tty ]; then
+    echo -e ""
+    echo -e "${YELLOW}[?] Do you want to create a Systemd Service for auto-start? [y/N] ${NC}"
+    read -r -n 1 response < /dev/tty
+    echo ""
+  fi
 
   if [[ "$response" =~ ^[yY]$ ]]; then
     SERVICE_NAME="lortnoc-client"
