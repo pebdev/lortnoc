@@ -19,7 +19,8 @@ unsafe-load-any-extension=yes
 # R0902: Too many instance attributes
 # R0903: Too few public methods
 # W0212: Access to a protected member _x of a client class
-disable=C0114,C0115,C0116,E0401,W1203,W0718,R0902,R0903,W0212
+# R0915: Too many statements
+disable=C0114,C0115,C0116,E0401,W1203,W0718,R0902,R0903,W0212,R0915
 
 [TYPECHECK]
 # List of members which are set dynamically and missed by pylint inference

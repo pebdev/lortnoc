@@ -12,20 +12,10 @@
 # pylint: disable=too-many-statements, too-many-branches, too-many-arguments, too-many-positional-arguments
 
 # I M P O R T ##########################################################################################################
-import uuid
-import sys
-import os
-import pyotp
 from datetime import datetime
+import uuid
+import pyotp
 from nicegui import ui
-
-# Import Transport
-try:
-  from lortnoc_core.transport_discord import DiscordTransport
-except ImportError:
-  # Fallback for dev if core is not installed but in adjacent folder
-  sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../')))
-  from lortnoc_core.transport_discord import DiscordTransport
 
 
 # C L A S S ############################################################################################################
@@ -574,7 +564,7 @@ class UIManager:
       self.cmd_history_idx[client_id] = len(self.cmd_history[client_id])
 
   # --------------------------------------------------------------------------------------------------------------------
-  def _on_cmd_history (self, e, input_el, client_id, direction):
+  def _on_cmd_history (self, _e, input_el, client_id, direction):
     """
     Handles Up/Down arrow for command history.
     direction: -1 (up/back), 1 (down/forward)
