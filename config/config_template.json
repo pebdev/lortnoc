@@ -1,16 +1,17 @@
 {
-  "admin_password"          : "",
-  "totp_secret"             : "",
+  "admin_password"            : "",
+  "totp_secret"               : "",
 
-  "client_id"               : "",
-  "client_name"             : "",
+  "client_id"                 : "",
+  "client_name"               : "",
 
-  "heartbeat_interval"      : 300,
-  "log_file"                : "/tmp/lortnoc.log",
+  "heartbeat_interval"        : 300,
+  "log_file"                  : "/tmp/lortnoc.log",
+  "default_working_directory" : null,
 
   "discord": {
-    "token"                 : "",
-    "heartbeat_channel_id"  : "",
-    "encryption_key"        : ""
+    "token"                   : "",
+    "heartbeat_channel_id"    : "",
+    "encryption_key"          : ""
   }
 }

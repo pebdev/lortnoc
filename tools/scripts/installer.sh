@@ -370,6 +370,17 @@ rm -rf "$TEMP_DIR"
 chmod +x "$INSTALL_DIR/tools/scripts/"*.sh
 echo -e "${GREEN}[✓] $COMPONENT installed/updated to $LATEST_VERSION.${NC}"
 
+# --- Service Restart (Client Update) ----------------------------------------------------------------------------------
+if [ "$COMPONENT" == "client" ] && [ -f "/etc/systemd/system/lortnoc-client.service" ]; then
+  echo -e "${YELLOW}[*] Restarting service to apply updates...${NC}"
+  SUDO_CMD=""
+  [ "$EUID" -ne 0 ] && SUDO_CMD="sudo"
+
+  $SUDO_CMD systemctl daemon-reload
+  $SUDO_CMD systemctl restart lortnoc-client
+  echo -e "${GREEN}[✓] Service successfully restarted.${NC}"
+fi
+
 echo -e ""
 echo -e "${BLUE}=========================================${NC}"
 echo -e "${BLUE}   INSTALLATION SUMMARY                  ${NC}"

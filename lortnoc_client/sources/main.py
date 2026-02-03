@@ -21,6 +21,8 @@ import time
 import psutil
 import discord
 
+from utils.shell_session import ShellSession
+
 # Adjust sys.path to include lortnoc_core
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
@@ -49,6 +51,17 @@ class LortnocClient:
     self.config = load_config()
     setup_logging(self.config.get("log_file", "/tmp/lortnoc.log"))
     self.logger = logging.getLogger("lortnoc-client")
+
+    # Determine initial Shell CWD
+    initial_cwd = None
+    if conf_cwd := self.config.get("default_working_directory"):
+      expanded = os.path.expanduser(conf_cwd)
+      if os.path.isdir(expanded):
+        initial_cwd = os.path.abspath(expanded)
+      else:
+        self.logger.warning(f"Configured default_working_directory '{conf_cwd}' not found. using default.")
+
+    self.shell = ShellSession(_initial_cwd=initial_cwd)
 
     # 2. Paths
     self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../.data'))
@@ -273,21 +286,9 @@ class LortnocClient:
 
   # H E L P E R S ------------------------------------------------------------------------------------------------------
   async def _exec_shell (self, cmd: str) -> (str, bool):
-    """Executes a shell command and returns output and error status."""
-    if not cmd:
-      return "No command provided", True
-
+    """Executes a shell command via the persistent session."""
     try:
-      proc = await asyncio.create_subprocess_shell(
-        cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
-      )
-      stdout, stderr = await proc.communicate()
-      output = stdout.decode().strip()
-      if stderr:
-        output += "\nSTDERR: " + stderr.decode().strip()
-      return output, bool(stderr)
+      return await self.shell.execute(cmd)
     except Exception as e:
       return str(e), True
 

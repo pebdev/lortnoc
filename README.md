@@ -37,6 +37,7 @@ graph TD
 - **Features**:
   - Metrics reporting (CPU, RAM, Temperature, IP, etc.).
   - System command execution (Reboot, Shutdown, Shell).
+  - **Stateful Shell Session**: Maintains command history, current working directory (`cd`), and environment variables (`export`) between commands.
   - Autonomous management of its communication channel.
 
 
@@ -145,7 +146,8 @@ The configuration is stored in `config/config.json`.
   "totp_secret"       : "JBSWY3DPEHPK3PXP",         (Monitor Only - Base32)
 
   "client_id"         : "173840123-5678",
-  "client_name"       : "My-Device-01", 
+  "client_name"       : "My-Device-01",
+  "default_working_directory": "/app", 
   "heartbeat_interval": 60,
   "log_file"          : "/tmp/lortnoc.log",
 
@@ -160,6 +162,7 @@ The configuration is stored in `config/config.json`.
 * `admin_password`   (Monitor Only) : Password to access the web dashboard.
 * `totp_secret`      (Monitor Only) : **Secret Key for 2FA** (Base32 format). Used to generate TOTP codes with Google Authenticator or similar apps.
 * `client_id`         (Client Only) : **Technical Unique ID**. Auto-generated if empty. Used for routing.
+* `default_working_directory` (Client Only) : (Optional) Sets the initial working directory for the shell session. If `null`, uses the system default.
 * `client_name`       (Client Only) : **Display Name**. Used in the Dashboard.
 * `heartbeat_interval`              : Interval (in seconds) between heartbeats.
 * `log_file`                        : Path to the log file.
@@ -201,5 +204,6 @@ You can use the provided Docker tools to run environments locally.
 
 All updates are centralized and managed via the **Monitor Web Interface**.
 
+    *   *Note: If installed as a Systemd service, the service will automatically restart to apply the update.*
 *   **Clients**: You can trigger a self-update command from the dashboard for any specific client.
 *   **Monitor**: The monitor can also update itself via the interface (rebuilds and restarts the container).
