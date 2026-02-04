@@ -12,7 +12,7 @@
 # pylint: disable=too-many-statements, too-many-branches, too-many-arguments, too-many-positional-arguments
 
 # I M P O R T ##########################################################################################################
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import pyotp
 from nicegui import ui
@@ -416,7 +416,11 @@ class UIManager:
                 pass
             seen_str = "Never"
             if isinstance(seen_time, datetime):
-              diff = (datetime.now() - seen_time).total_seconds()
+              # Ensure seen_time is aware (assume UTC if not) for comparison
+              if seen_time.tzinfo is None:
+                seen_time = seen_time.replace(tzinfo=timezone.utc)
+
+              diff = (datetime.now(timezone.utc) - seen_time).total_seconds()
               if diff < 60:
                 seen_str = "Just now"
               elif diff < 3600:
@@ -549,6 +553,12 @@ class UIManager:
   def _on_cmd_enter (self, e, client_id):
     val = e.sender.value
     if val:
+      if val.strip() == "clear":
+        self.monitor.logs = [log for log in self.monitor.logs if log.get('client_id') != client_id]
+        e.sender.value = ""
+        self.render_client_terminal.refresh()
+        return
+
       self.monitor.send_command(client_id, "exec", [val])
       e.sender.value = ""
 
