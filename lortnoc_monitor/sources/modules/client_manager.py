@@ -14,7 +14,7 @@ import os
 import json
 import logging
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 # C L A S S ############################################################################################################
@@ -89,7 +89,8 @@ class ClientManager:
       return
 
     existing = self.get_client(client_id)
-    _client_data['last_seen'] = datetime.now().isoformat()
+    # Use timezone-aware UTC datetime for storage
+    _client_data['last_seen'] = datetime.now(timezone.utc).isoformat()
 
     if existing:
       existing.update(_client_data)

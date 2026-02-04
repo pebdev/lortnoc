@@ -75,6 +75,13 @@ for cmd in $REQUIRED; do
   fi
 done
 
+# Check for python3-venv module
+if ! python3 -c "import venv" &> /dev/null; then
+  echo -e "${RED}Error: The 'python3-venv' module is missing.${NC}"
+  echo -e "${YELLOW}  -> Please install it (e.g. 'sudo apt install python3-venv' on Debian/Ubuntu).${NC}"
+  exit 1
+fi
+
 
 # --- Get Latest Release -----------------------------------------------------------------------------------------------
 echo -e "${YELLOW}[*] Checking for updates...${NC}"
@@ -202,6 +209,15 @@ if os.path.exists(target):
   else:
     n = prompt('Lortnoc client name')
     if n: config['client_name'] = n
+
+    # Default CWD
+    d_cwd = prompt('Default Working Directory [~/]')
+    if not d_cwd:
+      d_cwd = "~/"
+    else:
+      # User input cleanup: strip quotes if user added them
+      d_cwd = d_cwd.strip('"').strip("'")
+    config['default_working_directory'] = d_cwd
 
     t = prompt('Discord Token', hidden=True)
     if t: config['discord']['token'] = t
