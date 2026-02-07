@@ -197,11 +197,16 @@ class LortnocMonitor:
   async def _monitor_loop(self) -> None:
     """ Periodically checks for offline clients. """
     self.logger.info("Starting Offline Monitor Loop")
+
+    # Get heartbeat interval from config (default 1000s)
+    hb_interval = int(self.config.get("heartbeat_interval", 1000))
+    # Add margin: Allow 2 missed heartbeats + jitter (2.5x)
+    timeout = int(hb_interval * 2.5)
+    self.logger.info(f"Offline detection timeout set to {timeout}s (Based on interval {hb_interval}s)")
+
     while True:
       try:
-        # Check for clients silent for more than 5 minutes (300s)
-        # Assuming heartbeat interval is ~30s-60s
-        changed = self.client_manager.check_offline_clients(timeout_seconds=300)
+        changed = self.client_manager.check_offline_clients(timeout_seconds=timeout)
         if changed > 0:
           self.add_log(f"Marked {changed} clients as offline", "SYSTEM")
           # Force UI refresh
@@ -211,7 +216,7 @@ class LortnocMonitor:
       except Exception as e:
         self.logger.error(f"Error in monitor loop: {e}")
 
-      await asyncio.sleep(60) # Run every minute
+      await asyncio.sleep(60)
 
   # --------------------------------------------------------------------------------------------------------------------
   async def shutdown (self) -> None:
