@@ -94,6 +94,44 @@ class ClientManager:
 
     if existing:
       existing.update(_client_data)
+      # Force status online on update
+      existing['status'] = 'online'
     else:
+      _client_data['status'] = 'online'
       self.clients.append(_client_data)
       self.save_clients()
+
+  # --------------------------------------------------------------------------------------------------------------------
+  def check_offline_clients (self, timeout_seconds: int = 600) -> int:
+    """
+    Checks for clients that haven't been seen in a while and marks them as offline.
+    Returns the number of clients marked offline in this check.
+    """
+    count = 0
+    now = datetime.now(timezone.utc)
+
+    for client in self.clients:
+      if client.get('status') == 'offline':
+        continue
+
+      last_seen_str = client.get('last_seen')
+      if not last_seen_str:
+        client['status'] = 'offline'
+        count += 1
+        continue
+
+      try:
+        last_seen = datetime.fromisoformat(last_seen_str)
+        delta = (now - last_seen).total_seconds()
+
+        if delta > timeout_seconds:
+          client['status'] = 'offline'
+          self.logger.info(f"Client {client.get('name')} ({client.get('id')}) marked offline due to timeout ({int(delta)}s > {timeout_seconds}s)")
+          count += 1
+      except Exception as e:
+        self.logger.warning(f"Error checking timeout for client {client.get('id')}: {e}")
+
+    if count > 0:
+      self.save_clients()
+
+    return count

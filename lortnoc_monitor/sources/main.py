@@ -190,6 +190,29 @@ class LortnocMonitor:
     if count > 0:
       self.add_log(f"Ping sent to {count} devices", "SYSTEM")
 
+    # Start Keep-Alive / Monitor Loop
+    asyncio.create_task(self._monitor_loop())
+
+  # --------------------------------------------------------------------------------------------------------------------
+  async def _monitor_loop(self) -> None:
+    """ Periodically checks for offline clients. """
+    self.logger.info("Starting Offline Monitor Loop")
+    while True:
+      try:
+        # Check for clients silent for more than 5 minutes (300s)
+        # Assuming heartbeat interval is ~30s-60s
+        changed = self.client_manager.check_offline_clients(timeout_seconds=300)
+        if changed > 0:
+          self.add_log(f"Marked {changed} clients as offline", "SYSTEM")
+          # Force UI refresh
+          self.ui_manager.refresh_sidebar()
+          if self.ui_manager.current_view == "dashboard":
+            self.ui_manager.show_dashboard()
+      except Exception as e:
+        self.logger.error(f"Error in monitor loop: {e}")
+
+      await asyncio.sleep(60) # Run every minute
+
   # --------------------------------------------------------------------------------------------------------------------
   async def shutdown (self) -> None:
     """ Shutdown procedure for the monitor."""

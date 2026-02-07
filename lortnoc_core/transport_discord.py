@@ -40,6 +40,7 @@ class DiscordTransport(Transport):
 
     super().__init__()
     self.token = _token
+    self._keep_alive = False
     self.listening_channels = _listening_channels if _listening_channels else []
 
     # Encryption Setup
@@ -160,16 +161,39 @@ class DiscordTransport(Transport):
       return
 
     logger.info("Connecting to Discord Gateway...")
-    # client.start is an async task that runs forever. We spawn it.
-    asyncio.create_task(self.client.start(self.token))
+    self._keep_alive = True
+    # client.start is an async task that runs forever. We spawn it via a recovery loop.
+    asyncio.create_task(self._connect_loop())
+
+  # ----------------------------------------------------------------------------------------------------------------------
+  async def _connect_loop(self) -> None:
+    """Internal loop to keep the client connected handling crashes."""
+    while self._keep_alive:
+      try:
+        await self.client.start(self.token)
+        if not self._keep_alive:
+          break
+        logger.warning("Discord client stopped unexpectedly. Restarting in 1s...")
+        await asyncio.sleep(1)
+      except discord.LoginFailure:
+        logger.critical("Invalid Discord Token. Stopping connection loop.")
+        self._keep_alive = False
+        break
+      except Exception as e:
+        self._connected = False
+        logger.error(f"Discord connection lost/failed: {e}. Retrying in 5s...")
+        await asyncio.sleep(5)
+        if not self.client.is_closed():
+          try:
+            await self.client.close()
+          except Exception:
+            pass
 
   # ----------------------------------------------------------------------------------------------------------------------
   async def disconnect (self) -> None:
     """Closes connection to Discord."""
 
-    if not self._connected:
-      return
-
+    self._keep_alive = False
     await self.client.close()
     self._connected = False
     logger.info("Disconnected from Discord.")
