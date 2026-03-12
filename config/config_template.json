@@ -5,7 +5,7 @@
   "client_id"                 : "",
   "client_name"               : "",
 
-  "heartbeat_interval"        : 300,
+  "heartbeat_interval"        : 600,
   "log_file"                  : "/tmp/lortnoc.log",
   "default_working_directory" : null,
 

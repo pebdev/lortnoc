@@ -357,12 +357,14 @@ if [ "$MODE" == "--install" ] && [ "$COMPONENT" == "client" ]; then
       cat <<EOF > "$TMP_SERVICE"
 [Unit]
 Description=Lortnoc Client Service
-After=network.target
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=$USER_NAME
 WorkingDirectory=$INSTALL_DIR
+ExecStartPre=/bin/sleep 10
 ExecStart=$INSTALL_DIR/tools/scripts/run.sh client
 Restart=always
 RestartSec=10
